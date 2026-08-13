@@ -1,0 +1,57 @@
+# Retail AI Intelligence & Forecasting Workflow Platform
+# Local configuration: authentication, roles, and system paths.
+# NOTE: passwords below are stored as SHA-256 hex digests (see src/utils/auth.py).
+# Default password for every seeded account is the username itself, e.g. user "admin" -> password "admin123".
+
+paths:
+  data_raw_dir: "data/raw"
+  artifacts_dir: "artifacts"
+  dataset_manifest: "data/dataset_manifest.json"
+  required_source_files:
+    - "stores.csv"
+    - "features.csv"
+    - "train.csv"
+
+credentials:
+  usernames:
+    admin:
+      name: "Platform Admin"
+      role: "Admin"
+      # sha256("admin123")
+      password_hash: "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9"
+    analyst:
+      name: "Data Analyst"
+      role: "Analyst"
+      # sha256("analyst123")
+      password_hash: "20249749412d73a3f5799f6f1dcf910e7b4aa3ce4de133b1f8a63c044792a4e9"
+    scientist:
+      name: "Data Scientist"
+      role: "Scientist"
+      # sha256("scientist123")
+      password_hash: "8526cca1defcad70503370011071aca3d408cb0c7758c12363cb7ad7aab8b0eb"
+    business:
+      name: "Business Stakeholder"
+      role: "Business"
+      # sha256("business123")
+      password_hash: "207f777b7a35d8c12a4da158553f7adf64f19118e5ecfe79812f071e8ebd4248"
+
+roles:
+  Admin:
+    - run_workflow
+    - view_descriptive
+    - view_predictive
+    - view_logs
+  Analyst:
+    - view_descriptive
+  Scientist:
+    - view_predictive
+  Business:
+    - view_descriptive
+    - view_predictive
+
+contract:
+  primary_keys:
+    - "Store"
+    - "Dept"
+    - "Date"
+  target_column: "Weekly_Sales"

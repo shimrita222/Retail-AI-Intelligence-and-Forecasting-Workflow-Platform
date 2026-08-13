@@ -1,0 +1,9 @@
+crewai
+streamlit
+pandas
+numpy
+scikit-learn
+plotly
+pyyaml
+pytest
+joblib

@@ -1,0 +1,64 @@
+{
+  "dataset_name": "Retail Data Analytics",
+  "kaggle_listing_url": "https://www.kaggle.com/datasets/manjeetsingh/retaildataset",
+  "uploader": "Manjeet Singh",
+  "license": "CC0: Public Domain",
+  "source_files": [
+    {
+      "canonical_name": "stores.csv",
+      "original_filename": "stores data-set.csv",
+      "description": "Anonymized store metadata: store id, store type (A/B/C), and store size in square feet.",
+      "row_count_expected": 45,
+      "columns": {
+        "Store": "int - store identifier (1-45)",
+        "Type": "string - store category, one of A, B, C",
+        "Size": "int - approximate store square footage"
+      }
+    },
+    {
+      "canonical_name": "features.csv",
+      "original_filename": "Features data set.csv",
+      "description": "Store-level weekly exogenous features: economic indicators, weather, and promotional markdowns.",
+      "row_count_expected": 8190,
+      "columns": {
+        "Store": "int - store identifier",
+        "Date": "date (dd/mm/yyyy) - week ending date",
+        "Temperature": "float - average regional temperature",
+        "Fuel_Price": "float - regional fuel cost",
+        "MarkDown1": "float, nullable - anonymized promotional markdown",
+        "MarkDown2": "float, nullable - anonymized promotional markdown",
+        "MarkDown3": "float, nullable - anonymized promotional markdown",
+        "MarkDown4": "float, nullable - anonymized promotional markdown",
+        "MarkDown5": "float, nullable - anonymized promotional markdown",
+        "CPI": "float, nullable - consumer price index",
+        "Unemployment": "float, nullable - regional unemployment rate",
+        "IsHoliday": "bool - whether the week contains a major US holiday"
+      }
+    },
+    {
+      "canonical_name": "train.csv",
+      "original_filename": "sales data-set.csv",
+      "description": "Historical weekly sales by store and department.",
+      "row_count_expected": 421570,
+      "columns": {
+        "Store": "int - store identifier",
+        "Dept": "int - department identifier",
+        "Date": "date (dd/mm/yyyy) - week ending date",
+        "Weekly_Sales": "float - sales for the given store/dept/week",
+        "IsHoliday": "bool - whether the week contains a major US holiday"
+      }
+    }
+  ],
+  "join_keys": {
+    "stores_to_train": ["Store"],
+    "features_to_train": ["Store", "Date"],
+    "grain": ["Store", "Dept", "Date"]
+  },
+  "provenance_notes": [
+    "Downloaded from the Kaggle 'Retail Data Analytics' listing uploaded by Manjeet Singh.",
+    "This is the same dataset distributed for the Walmart Recruiting - Store Sales Forecasting competition, re-hosted under CC0.",
+    "Original filenames ('Features data set.csv', 'sales data-set.csv', 'stores data-set.csv') are renamed to canonical names (features.csv, train.csv, stores.csv) on ingestion into data/raw/.",
+    "No rows, columns, or values are synthesized, substituted, or fabricated. Only the approved three source files are used.",
+    "MarkDown1-5 fields are largely absent prior to Nov 2011 (promotions were not tracked before that date); missing values are treated as 'no markdown active', not as data-quality defects."
+  ]
+}
