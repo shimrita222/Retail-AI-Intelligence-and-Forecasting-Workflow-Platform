@@ -45,8 +45,8 @@ def test_lag_features_have_no_leakage():
     df = engineer_features(_synthetic_series_df())
     # Row for week index i (0-based) should have Lag1 == sales[i-1] and Lag4 == sales[i-4]
     row_week5 = df[df["Date"] == pd.Timestamp("2010-01-01") + pd.Timedelta(days=7 * 5)].iloc[0]
-    assert row_week5["Weekly_Sales_Lag1"] == 150.0  # previous week's actual sales
-    assert row_week5["Weekly_Sales_Lag4"] == 120.0  # four weeks prior
+    assert row_week5["Weekly_Sales_Lag1"] == 140.0  # previous week's (index 4) actual sales
+    assert row_week5["Weekly_Sales_Lag4"] == 110.0  # four weeks prior (index 1)
     # No lag column may equal or exceed the row's own current sales value by construction bias
     assert (df["Weekly_Sales_Lag1"] < df["Weekly_Sales"]).all()
 
