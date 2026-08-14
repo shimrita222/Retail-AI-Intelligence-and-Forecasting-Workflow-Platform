@@ -232,6 +232,52 @@ def _records_to_html_table(records: list[dict[str, Any]]) -> str:
     return df.to_html(index=False, classes="micro-table", border=0)
 
 
+def _format_currency(value: float | None) -> str:
+    return f"${value:,.2f}" if value is not None else "N/A"
+
+
+def _holiday_impact_html(holiday_impact: dict[str, Any]) -> str:
+    holiday_mean = holiday_impact.get("holiday_mean")
+    non_holiday_mean = holiday_impact.get("non_holiday_mean")
+    spikes = holiday_impact.get("stores_with_largest_individual_spikes", [])
+
+    kpis = (
+        f"<div class=\"kpi\"><strong>Holiday-week mean sales:</strong> {_format_currency(holiday_mean)}</div>"
+        f"<div class=\"kpi\"><strong>Non-holiday-week mean sales:</strong> {_format_currency(non_holiday_mean)}</div>"
+    )
+
+    if spikes:
+        spikes_df = pd.DataFrame(spikes).rename(
+            columns={
+                "Store": "Store",
+                "non_holiday_mean": "Non-Holiday Mean",
+                "holiday_mean": "Holiday Mean",
+                "spike_ratio": "Spike Ratio",
+            }
+        )
+        spikes_df = spikes_df[["Store", "Non-Holiday Mean", "Holiday Mean", "Spike Ratio"]]
+        table = spikes_df.to_html(index=False, classes="micro-table", border=0)
+    else:
+        table = "<p><em>No holiday spike data available.</em></p>"
+
+    return f"{kpis}<h4>Top individual store holiday spikes</h4>{table}"
+
+
+def _markdown_effect_html(markdown_effect: dict[str, Any]) -> str:
+    if not markdown_effect:
+        return "<p><em>No markdown columns present in this dataset.</em></p>"
+
+    with_md = markdown_effect.get("mean_sales_weeks_with_any_markdown")
+    without_md = markdown_effect.get("mean_sales_weeks_without_markdown")
+    outlier_count = markdown_effect.get("extreme_outlier_count", 0)
+
+    return (
+        f"<div class=\"kpi\"><strong>Mean sales (with markdown):</strong> {_format_currency(with_md)}</div>"
+        f"<div class=\"kpi\"><strong>Mean sales (no markdown):</strong> {_format_currency(without_md)}</div>"
+        f"<div class=\"kpi\"><strong>Extreme markdown outliers:</strong> {outlier_count}</div>"
+    )
+
+
 def render_eda_report_html(
     profiling: dict[str, Any],
     micro_inspection: dict[str, Any],
@@ -290,9 +336,9 @@ def render_eda_report_html(
   <h3>Monthly sales trend</h3>
   {pd.DataFrame(list(business_intelligence['monthly_trend'].items()), columns=['Month', 'Mean Weekly Sales']).to_html(index=False, classes='micro-table', border=0)}
   <h3>Holiday impact</h3>
-  <pre>{json.dumps(business_intelligence['holiday_impact'], indent=2)}</pre>
+  {_holiday_impact_html(business_intelligence['holiday_impact'])}
   <h3>Markdown effect</h3>
-  <pre>{json.dumps(business_intelligence['markdown_effect'], indent=2)}</pre>
+  {_markdown_effect_html(business_intelligence['markdown_effect'])}
 </div>
 
 </body>
