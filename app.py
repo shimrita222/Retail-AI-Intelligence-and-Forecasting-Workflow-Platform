@@ -339,10 +339,8 @@ def render_descriptive_page() -> None:
     non_holiday_mean = holiday_impact.get("non_holiday_mean")
 
     h1, h2 = st.columns(2)
-    h1.metric("Holiday-week mean sales", f"${holiday_mean:,.2f}" if holiday_mean is not None else "N/A")
-    h2.metric(
-        "Non-holiday-week mean sales", f"${non_holiday_mean:,.2f}" if non_holiday_mean is not None else "N/A"
-    )
+    h1.metric("Holiday Mean Sales", f"${holiday_mean:,.2f}" if holiday_mean is not None else "N/A")
+    h2.metric("Non-Holiday Mean Sales", f"${non_holiday_mean:,.2f}" if non_holiday_mean is not None else "N/A")
 
     if holiday_mean is not None and non_holiday_mean is not None:
         holiday_chart_df = pd.DataFrame(
@@ -360,7 +358,15 @@ def render_descriptive_page() -> None:
     top_spikes = holiday_impact.get("stores_with_largest_individual_spikes", [])
     if top_spikes:
         st.markdown("**Top Individual Store Holiday Spikes**")
-        st.dataframe(pd.DataFrame(top_spikes), use_container_width=True, hide_index=True)
+        spikes_df = pd.DataFrame(top_spikes).rename(
+            columns={
+                "non_holiday_mean": "Non-Holiday Mean",
+                "holiday_mean": "Holiday Mean",
+                "spike_ratio": "Spike Ratio",
+            }
+        )
+        spikes_df = spikes_df[["Store", "Non-Holiday Mean", "Holiday Mean", "Spike Ratio"]]
+        st.dataframe(spikes_df, use_container_width=True, hide_index=True)
 
     st.markdown("**Markdown Effect**")
     markdown_effect = business_intelligence.get("markdown_effect", {})
@@ -368,11 +374,9 @@ def render_descriptive_page() -> None:
         with_md = markdown_effect.get("mean_sales_weeks_with_any_markdown")
         without_md = markdown_effect.get("mean_sales_weeks_without_markdown")
         m1, m2, m3 = st.columns(3)
-        m1.metric("Mean sales — weeks with markdown", f"${with_md:,.2f}" if with_md is not None else "N/A")
-        m2.metric(
-            "Mean sales — weeks without markdown", f"${without_md:,.2f}" if without_md is not None else "N/A"
-        )
-        m3.metric("Extreme markdown outliers", markdown_effect.get("extreme_outlier_count", 0))
+        m1.metric("Mean Sales (With Markdown)", f"${with_md:,.2f}" if with_md is not None else "N/A")
+        m2.metric("Mean Sales (No Markdown)", f"${without_md:,.2f}" if without_md is not None else "N/A")
+        m3.metric("Extreme Outlier Count", markdown_effect.get("extreme_outlier_count", 0))
     else:
         st.info("No markdown columns present in this run's data.")
 
