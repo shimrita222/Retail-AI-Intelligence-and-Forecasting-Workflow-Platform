@@ -21,6 +21,9 @@ Retail Data Analytics/
 # Scratch / non-project files
 final_project_brief_1.html
 
+# Claude Code personal/local overrides
+.claude/settings.local.json
+
 # OS
 .DS_Store
 Thumbs.db

@@ -8,6 +8,7 @@ data passes validation, never trains a model, and never computes a metric.
 
 ## Contents
 
+- [Dataset](#dataset)
 - [Architecture](#architecture)
 - [Setup](#setup)
 - [Running the app](#running-the-app)
@@ -16,6 +17,15 @@ data passes validation, never trains a model, and never computes a metric.
 - [Project structure](#project-structure)
 - [Roles & credentials](#roles--credentials)
 - [Design decisions & guardrails](#design-decisions--guardrails)
+
+## Dataset
+
+This project uses the **"Retail Data Analytics"** dataset from Kaggle:
+
+- **Dataset**: Retail Data Analytics
+- **Uploader**: [Manjeet Singh](https://www.kaggle.com/manjeetsingh)
+- **URL**: https://www.kaggle.com/datasets/manjeetsingh/retaildataset
+- **License**: CC0: Public Domain (as declared on the Kaggle listing)
 
 ## Architecture
 
