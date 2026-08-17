@@ -143,6 +143,24 @@ def validate_dataframe(df: pd.DataFrame, contract: dict[str, Any]) -> dict[str, 
                         f"{above} row(s) have '{target_column}' above the contract maximum of {max_bound}"
                     )
 
+            # Non-blocking observations: negative/zero target values are within
+            # the bounds above and do not fail the contract, but the source
+            # documentation does not establish their business meaning, so they
+            # are surfaced as warnings rather than silently passing unremarked.
+            negative_count = int((numeric_target < 0).sum())
+            if negative_count > 0:
+                warnings.append(
+                    f"{negative_count} row(s) have a negative '{target_column}' value; the source "
+                    "dataset does not document what a negative value represents (not confirmed as "
+                    "returns, refunds, or corrections). Values are retained; see dataset manifest."
+                )
+            zero_count = int((numeric_target == 0).sum())
+            if zero_count > 0:
+                warnings.append(
+                    f"{zero_count} row(s) have a '{target_column}' value of exactly zero. Retained as "
+                    "plausible observations; not treated as missing or invalid."
+                )
+
     status = "FAIL" if errors else "PASS"
     return {"status": status, "errors": errors, "warnings": warnings}
 

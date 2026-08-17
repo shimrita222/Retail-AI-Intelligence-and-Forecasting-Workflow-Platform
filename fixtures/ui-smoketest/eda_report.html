@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Retail EDA Report</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 2rem; color: #1a1a1a; }
+  h1, h2 { border-bottom: 2px solid #ddd; padding-bottom: 0.3rem; }
+  table.micro-table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  table.micro-table th, table.micro-table td { border: 1px solid #ccc; padding: 6px 10px; font-size: 0.85rem; }
+  table.micro-table th { background: #f2f2f2; }
+  .kpi { display: inline-block; margin: 0.5rem 1rem 0.5rem 0; padding: 0.75rem 1rem; background: #f7f7f7; border-radius: 6px; }
+  .section { margin-bottom: 2.5rem; }
+</style>
+</head>
+<body>
+<h1>Retail Data Analytics &mdash; EDA Report</h1>
+
+<div class="section">
+  <h2>Dataset Profile</h2>
+  <div class="kpi"><strong>Rows:</strong> 29,518</div>
+  <div class="kpi"><strong>Stores:</strong> 3</div>
+  <div class="kpi"><strong>Departments:</strong> 78</div>
+  <div class="kpi"><strong>Date range:</strong> 2010-02-05 to 2012-10-26</div>
+  <h3>Null counts by column</h3>
+  <table class="dataframe micro-table">
+  <thead>
+    <tr style="text-align: right;">
+      <th>Column</th>
+      <th>Nulls</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>MarkDown1</td>
+      <td>18953</td>
+    </tr>
+    <tr>
+      <td>MarkDown2</td>
+      <td>21001</td>
+    </tr>
+    <tr>
+      <td>MarkDown3</td>
+      <td>19532</td>
+    </tr>
+    <tr>
+      <td>MarkDown4</td>
+      <td>19084</td>
+    </tr>
+    <tr>
+      <td>MarkDown5</td>
+      <td>18953</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="section">
+  <h2>Micro-Inspection Findings (record-level)</h2>
+  <p>These findings inspect individual (Store, Dept, Date) records rather than relying only on global aggregates.</p>
+
+  <h3>Zero-sales instances (6 total)</h3>
+  <table class="dataframe micro-table">
+  <thead>
+    <tr style="text-align: right;">
+      <th>Store</th>
+      <th>Dept</th>
+      <th>Date</th>
+      <th>Weekly_Sales</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>47</td>
+      <td>2011-03-11</td>
+      <td>0.0</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>47</td>
+      <td>2011-08-12</td>
+      <td>0.0</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>47</td>
+      <td>2011-08-19</td>
+      <td>0.0</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>47</td>
+      <td>2012-04-13</td>
+      <td>0.0</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>60</td>
+      <td>2010-03-19</td>
+      <td>0.0</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>36</td>
+      <td>2012-08-17</td>
+      <td>0.0</td>
+    </tr>
+  </tbody>
+</table>
+
+  <h3>Negative-sales instances (46 total)</h3>
+  <table class="dataframe micro-table">
+  <thead>
+    <tr style="text-align: right;">
+      <th>Store</th>
+      <th>Dept</th>
+      <th>Date</th>
+      <th>Weekly_Sales</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>2</td>
+      <td>47</td>
+      <td>2010-10-15</td>
+      <td>-1098.00</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>47</td>
+      <td>2010-11-19</td>
+      <td>-1098.00</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>47</td>
+      <td>2010-07-30</td>
+      <td>-1098.00</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>32</td>
+      <td>2011-09-30</td>
+      <td>-1008.96</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>47</td>
+      <td>2010-02-19</td>
+      <td>-863.00</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>47</td>
+      <td>2010-03-12</td>
+      <td>-698.00</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>47</td>
+      <td>2011-10-14</td>
+      <td>-498.00</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>47</td>
+      <td>2010-08-20</td>
+      <td>-498.00</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>47</td>
+      <td>2011-12-23</td>
+      <td>-498.00</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>47</td>
+      <td>2011-04-08</td>
+      <td>-298.00</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>48</td>
+      <td>2012-03-23</td>
+      <td>-223.00</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>47</td>
+      <td>2011-02-04</td>
+      <td>-219.00</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>47</td>
+      <td>2012-03-16</td>
+      <td>-199.00</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>47</td>
+      <td>2012-02-17</td>
+      <td>-198.00</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>47</td>
+      <td>2011-07-08</td>
+      <td>-198.00</td>
+    </tr>
+  </tbody>
+</table>
+
+  <h3>Top holiday sales spikes, per individual store</h3>
+  <table class="dataframe micro-table">
+  <thead>
+    <tr style="text-align: right;">
+      <th>Store</th>
+      <th>non_holiday_mean</th>
+      <th>holiday_mean</th>
+      <th>spike_ratio</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>3</td>
+      <td>6332.099</td>
+      <td>6916.446</td>
+      <td>1.092</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>26753.864</td>
+      <td>28798.711</td>
+      <td>1.076</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>21609.635</td>
+      <td>23039.387</td>
+      <td>1.066</td>
+    </tr>
+  </tbody>
+</table>
+
+  <h3>Extreme markdown outliers (IQR method, per-record)</h3>
+  <table class="dataframe micro-table">
+  <thead>
+    <tr style="text-align: right;">
+      <th>column</th>
+      <th>Store</th>
+      <th>Dept</th>
+      <th>Date</th>
+      <th>value</th>
+      <th>upper_bound</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>MarkDown1</td>
+      <td>2</td>
+      <td>79</td>
+      <td>2012-02-03</td>
+      <td>75149.79</td>
+      <td>27952.39</td>
+    </tr>
+    <tr>
+      <td>MarkDown1</td>
+      <td>2</td>
+      <td>80</td>
+      <td>2012-02-03</td>
+      <td>75149.79</td>
+      <td>27952.39</td>
+    </tr>
+    <tr>
+      <td>MarkDown1</td>
+      <td>2</td>
+      <td>81</td>
+      <td>2012-02-03</td>
+      <td>75149.79</td>
+      <td>27952.39</td>
+    </tr>
+    <tr>
+      <td>MarkDown1</td>
+      <td>2</td>
+      <td>82</td>
+      <td>2012-02-03</td>
+      <td>75149.79</td>
+      <td>27952.39</td>
+    </tr>
+    <tr>
+      <td>MarkDown1</td>
+      <td>2</td>
+      <td>83</td>
+      <td>2012-02-03</td>
+      <td>75149.79</td>
+      <td>27952.39</td>
+    </tr>
+    <tr>
+      <td>MarkDown2</td>
+      <td>2</td>
+      <td>99</td>
+      <td>2011-12-30</td>
+      <td>92523.94</td>
+      <td>6284.23</td>
+    </tr>
+    <tr>
+      <td>MarkDown2</td>
+      <td>2</td>
+      <td>97</td>
+      <td>2011-12-30</td>
+      <td>92523.94</td>
+      <td>6284.23</td>
+    </tr>
+    <tr>
+      <td>MarkDown2</td>
+      <td>2</td>
+      <td>85</td>
+      <td>2011-12-30</td>
+      <td>92523.94</td>
+      <td>6284.23</td>
+    </tr>
+    <tr>
+      <td>MarkDown2</td>
+      <td>2</td>
+      <td>98</td>
+      <td>2011-12-30</td>
+      <td>92523.94</td>
+      <td>6284.23</td>
+    </tr>
+    <tr>
+      <td>MarkDown2</td>
+      <td>2</td>
+      <td>95</td>
+      <td>2011-12-30</td>
+      <td>92523.94</td>
+      <td>6284.23</td>
+    </tr>
+    <tr>
+      <td>MarkDown3</td>
+      <td>2</td>
+      <td>4</td>
+      <td>2011-11-25</td>
+      <td>77451.26</td>
+      <td>394.56</td>
+    </tr>
+    <tr>
+      <td>MarkDown3</td>
+      <td>2</td>
+      <td>91</td>
+      <td>2011-11-25</td>
+      <td>77451.26</td>
+      <td>394.56</td>
+    </tr>
+    <tr>
+      <td>MarkDown3</td>
+      <td>2</td>
+      <td>6</td>
+      <td>2011-11-25</td>
+      <td>77451.26</td>
+      <td>394.56</td>
+    </tr>
+    <tr>
+      <td>MarkDown3</td>
+      <td>2</td>
+      <td>5</td>
+      <td>2011-11-25</td>
+      <td>77451.26</td>
+      <td>394.56</td>
+    </tr>
+    <tr>
+      <td>MarkDown3</td>
+      <td>2</td>
+      <td>8</td>
+      <td>2011-11-25</td>
+      <td>77451.26</td>
+      <td>394.56</td>
+    </tr>
+  </tbody>
+</table>
+
+  <h3>Largest week-over-week sales anomalies, per Store/Dept</h3>
+  <table class="dataframe micro-table">
+  <thead>
+    <tr style="text-align: right;">
+      <th>Store</th>
+      <th>Dept</th>
+      <th>Date</th>
+      <th>prev_sales</th>
+      <th>Weekly_Sales</th>
+      <th>pct_change</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>47</td>
+      <td>2011-10-14</td>
+      <td>0.00</td>
+      <td>-498.00</td>
+      <td>-inf</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>47</td>
+      <td>2011-04-08</td>
+      <td>0.00</td>
+      <td>-298.00</td>
+      <td>-inf</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>60</td>
+      <td>2010-05-07</td>
+      <td>0.00</td>
+      <td>6.00</td>
+      <td>inf</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>36</td>
+      <td>2012-08-24</td>
+      <td>0.00</td>
+      <td>24.00</td>
+      <td>inf</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>47</td>
+      <td>2012-07-06</td>
+      <td>0.00</td>
+      <td>-28.00</td>
+      <td>-inf</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>99</td>
+      <td>2011-03-04</td>
+      <td>0.01</td>
+      <td>380.00</td>
+      <td>37999.000</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>99</td>
+      <td>2012-10-05</td>
+      <td>0.03</td>
+      <td>635.00</td>
+      <td>21165.667</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>99</td>
+      <td>2012-10-05</td>
+      <td>0.06</td>
+      <td>595.00</td>
+      <td>9915.667</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>99</td>
+      <td>2012-08-03</td>
+      <td>0.06</td>
+      <td>230.08</td>
+      <td>3833.667</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>94</td>
+      <td>2012-05-11</td>
+      <td>1.00</td>
+      <td>2228.76</td>
+      <td>2227.760</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>48</td>
+      <td>2010-03-19</td>
+      <td>-3.00</td>
+      <td>2083.00</td>
+      <td>695.333</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>99</td>
+      <td>2012-08-24</td>
+      <td>0.10</td>
+      <td>60.10</td>
+      <td>600.000</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>94</td>
+      <td>2012-01-27</td>
+      <td>0.25</td>
+      <td>130.00</td>
+      <td>519.000</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>99</td>
+      <td>2012-08-03</td>
+      <td>0.04</td>
+      <td>20.00</td>
+      <td>499.000</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>99</td>
+      <td>2012-08-31</td>
+      <td>0.07</td>
+      <td>20.06</td>
+      <td>285.571</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="section">
+  <h2>Business Intelligence Summary</h2>
+  <h3>Monthly sales trend</h3>
+  <table class="dataframe micro-table">
+  <thead>
+    <tr style="text-align: right;">
+      <th>Month</th>
+      <th>Mean Weekly Sales</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>2010-02</td>
+      <td>19430.66</td>
+    </tr>
+    <tr>
+      <td>2010-03</td>
+      <td>18042.75</td>
+    </tr>
+    <tr>
+      <td>2010-04</td>
+      <td>18096.50</td>
+    </tr>
+    <tr>
+      <td>2010-05</td>
+      <td>18518.12</td>
+    </tr>
+    <tr>
+      <td>2010-06</td>
+      <td>19245.24</td>
+    </tr>
+    <tr>
+      <td>2010-07</td>
+      <td>17967.76</td>
+    </tr>
+    <tr>
+      <td>2010-08</td>
+      <td>18754.90</td>
+    </tr>
+    <tr>
+      <td>2010-09</td>
+      <td>17611.42</td>
+    </tr>
+    <tr>
+      <td>2010-10</td>
+      <td>17352.68</td>
+    </tr>
+    <tr>
+      <td>2010-11</td>
+      <td>20174.89</td>
+    </tr>
+    <tr>
+      <td>2010-12</td>
+      <td>22681.43</td>
+    </tr>
+    <tr>
+      <td>2011-01</td>
+      <td>16833.05</td>
+    </tr>
+    <tr>
+      <td>2011-02</td>
+      <td>19504.49</td>
+    </tr>
+    <tr>
+      <td>2011-03</td>
+      <td>18571.44</td>
+    </tr>
+    <tr>
+      <td>2011-04</td>
+      <td>18270.85</td>
+    </tr>
+    <tr>
+      <td>2011-05</td>
+      <td>17881.80</td>
+    </tr>
+    <tr>
+      <td>2011-06</td>
+      <td>18799.11</td>
+    </tr>
+    <tr>
+      <td>2011-07</td>
+      <td>17875.19</td>
+    </tr>
+    <tr>
+      <td>2011-08</td>
+      <td>18404.08</td>
+    </tr>
+    <tr>
+      <td>2011-09</td>
+      <td>17291.74</td>
+    </tr>
+    <tr>
+      <td>2011-10</td>
+      <td>17826.57</td>
+    </tr>
+    <tr>
+      <td>2011-11</td>
+      <td>20412.60</td>
+    </tr>
+    <tr>
+      <td>2011-12</td>
+      <td>21950.13</td>
+    </tr>
+    <tr>
+      <td>2012-01</td>
+      <td>17034.46</td>
+    </tr>
+    <tr>
+      <td>2012-02</td>
+      <td>19961.67</td>
+    </tr>
+    <tr>
+      <td>2012-03</td>
+      <td>19248.32</td>
+    </tr>
+    <tr>
+      <td>2012-04</td>
+      <td>19229.26</td>
+    </tr>
+    <tr>
+      <td>2012-05</td>
+      <td>19421.11</td>
+    </tr>
+    <tr>
+      <td>2012-06</td>
+      <td>19465.89</td>
+    </tr>
+    <tr>
+      <td>2012-07</td>
+      <td>18653.40</td>
+    </tr>
+    <tr>
+      <td>2012-08</td>
+      <td>18885.99</td>
+    </tr>
+    <tr>
+      <td>2012-09</td>
+      <td>18154.44</td>
+    </tr>
+    <tr>
+      <td>2012-10</td>
+      <td>18643.52</td>
+    </tr>
+  </tbody>
+</table>
+  <h3>Holiday impact</h3>
+  <div class="kpi"><strong>Holiday-week mean sales:</strong> $20,129.09</div><div class="kpi"><strong>Non-holiday-week mean sales:</strong> $18,715.15</div><h4>Top individual store holiday spikes</h4><table class="dataframe micro-table">
+  <thead>
+    <tr style="text-align: right;">
+      <th>Store</th>
+      <th>Non-Holiday Mean</th>
+      <th>Holiday Mean</th>
+      <th>Spike Ratio</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>3</td>
+      <td>6332.099</td>
+      <td>6916.446</td>
+      <td>1.092</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>26753.864</td>
+      <td>28798.711</td>
+      <td>1.076</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>21609.635</td>
+      <td>23039.387</td>
+      <td>1.066</td>
+    </tr>
+  </tbody>
+</table>
+  <h3>Markdown effect</h3>
+  <div class="kpi"><strong>Mean sales (with markdown):</strong> $19,301.03</div><div class="kpi"><strong>Mean sales (no markdown):</strong> $18,543.59</div><div class="kpi"><strong>Extreme markdown outliers:</strong> 15</div>
+</div>
+
+</body>
+</html>

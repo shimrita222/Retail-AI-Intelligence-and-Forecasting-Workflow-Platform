@@ -32,6 +32,7 @@ import streamlit as st
 from src.agents.analyst_crew import compute_business_intelligence, compute_micro_inspection
 from src.services.feature_pipeline import engineer_features, get_feature_columns
 from src.services.ml_trainer import chronological_split
+from src.services.run_registry import is_real_run_id
 from src.utils.auth import (
     current_user,
     has_permission,
@@ -124,6 +125,8 @@ def list_runs() -> list[dict[str, Any]]:
         return runs
     for run_dir in sorted(ARTIFACTS_DIR.iterdir(), reverse=True):
         if not run_dir.is_dir():
+            continue
+        if not is_real_run_id(run_dir.name):
             continue
         meta_path = run_dir / "run_metadata.json"
         if meta_path.exists():
@@ -374,9 +377,10 @@ def render_descriptive_page() -> None:
         with_md = markdown_effect.get("mean_sales_weeks_with_any_markdown")
         without_md = markdown_effect.get("mean_sales_weeks_without_markdown")
         m1, m2, m3 = st.columns(3)
-        m1.metric("Mean Sales (With Markdown)", f"${with_md:,.2f}" if with_md is not None else "N/A")
-        m2.metric("Mean Sales (No Markdown)", f"${without_md:,.2f}" if without_md is not None else "N/A")
-        m3.metric("Extreme Outlier Count", markdown_effect.get("extreme_outlier_count", 0))
+        m1.metric("Mean Sales (Recorded Markdown)", f"${with_md:,.2f}" if with_md is not None else "N/A")
+        m2.metric("Mean Sales (No Recorded Markdown)", f"${without_md:,.2f}" if without_md is not None else "N/A")
+        m3.metric("Extreme Outlier Count (Store-Date)", markdown_effect.get("extreme_outlier_count", 0))
+        st.caption(markdown_effect.get("grain_note", ""))
     else:
         st.info("No markdown columns present in this run's data.")
 

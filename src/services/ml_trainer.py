@@ -113,6 +113,8 @@ def save_artifacts(result: dict[str, Any], output_dir: str | Path) -> dict[str, 
         "test_rows": result["test_rows"],
         "split_cutoff_date": result["split_cutoff_date"],
     }
+    if "modeling_population" in result:
+        report["modeling_population"] = result["modeling_population"]
     report_path = output_dir / "evaluation_report.json"
     with report_path.open("w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
