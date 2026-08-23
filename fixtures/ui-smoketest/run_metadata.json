@@ -1,0 +1,25 @@
+{
+  "run_id": "ui-smoketest",
+  "run_dir": "artifacts\\ui-smoketest",
+  "status": "COMPLETED",
+  "clean_data_path": "artifacts\\ui-smoketest\\clean_data.csv",
+  "contract_path": "artifacts\\ui-smoketest\\dataset_contract.json",
+  "contract_status": "PASS",
+  "validation_errors": [],
+  "validation_warnings": [],
+  "selected_model_name": "Ridge",
+  "candidate_metrics": {
+    "Ridge": {
+      "MAE": 1714.7853238492226,
+      "RMSE": 3067.9353304444294,
+      "R2": 0.9877743626204483
+    },
+    "RandomForestRegressor": {
+      "MAE": 1627.0419006940833,
+      "RMSE": 3132.012438962416,
+      "R2": 0.9872583384487524
+    }
+  },
+  "started_at": "2026-08-14T00:00:00Z",
+  "finished_at": "2026-08-14T00:01:00Z"
+}

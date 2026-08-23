@@ -103,3 +103,25 @@ def test_ingestion_passes_contract_validation(tmp_path):
 def test_load_raw_tables_raises_on_missing_dir(tmp_path):
     with pytest.raises(Exception):
         load_raw_tables(tmp_path / "does_not_exist")
+
+
+def test_negative_target_values_produce_a_warning_not_a_failure():
+    df = _good_df()
+    df.loc[0, "Weekly_Sales"] = -15.0
+    result = validate_dataframe(df, _base_contract())
+    assert result["status"] == "PASS"
+    assert any("negative" in w and "Weekly_Sales" in w for w in result["warnings"])
+
+
+def test_zero_target_values_produce_a_warning_not_a_failure():
+    df = _good_df()
+    df.loc[0, "Weekly_Sales"] = 0.0
+    result = validate_dataframe(df, _base_contract())
+    assert result["status"] == "PASS"
+    assert any("zero" in w and "Weekly_Sales" in w for w in result["warnings"])
+
+
+def test_all_positive_target_values_produce_no_target_warnings():
+    result = validate_dataframe(_good_df(), _base_contract())
+    assert result["status"] == "PASS"
+    assert result["warnings"] == []

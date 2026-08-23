@@ -1,0 +1,78 @@
+{
+  "primary_keys": [
+    "Store",
+    "Dept",
+    "Date"
+  ],
+  "target_column": "Weekly_Sales",
+  "columns": {
+    "Store": {
+      "dtype": "int",
+      "nullable": false
+    },
+    "Dept": {
+      "dtype": "int",
+      "nullable": false
+    },
+    "Date": {
+      "dtype": "datetime",
+      "nullable": false
+    },
+    "Weekly_Sales": {
+      "dtype": "float",
+      "nullable": false,
+      "min": -5000.0,
+      "max": 800000.0
+    },
+    "IsHoliday": {
+      "dtype": "bool",
+      "nullable": false
+    },
+    "Type": {
+      "dtype": "string",
+      "nullable": true
+    },
+    "Size": {
+      "dtype": "int",
+      "nullable": true
+    },
+    "Temperature": {
+      "dtype": "float",
+      "nullable": true
+    },
+    "Fuel_Price": {
+      "dtype": "float",
+      "nullable": true
+    },
+    "CPI": {
+      "dtype": "float",
+      "nullable": true
+    },
+    "Unemployment": {
+      "dtype": "float",
+      "nullable": true
+    },
+    "MarkDown1": {
+      "dtype": "float",
+      "nullable": true
+    },
+    "MarkDown2": {
+      "dtype": "float",
+      "nullable": true
+    },
+    "MarkDown3": {
+      "dtype": "float",
+      "nullable": true
+    },
+    "MarkDown4": {
+      "dtype": "float",
+      "nullable": true
+    },
+    "MarkDown5": {
+      "dtype": "float",
+      "nullable": true
+    }
+  },
+  "generated_from_row_count": 29518,
+  "generation_method": "deterministic (src/agents/analyst_crew.py:build_dataset_contract)"
+}

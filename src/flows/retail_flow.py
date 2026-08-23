@@ -27,6 +27,11 @@ from src.services.contract_validator import validate_contract
 from src.services.data_ingestion import ingest_data
 from src.services.feature_pipeline import engineer_features, get_feature_columns
 from src.services.ml_trainer import save_artifacts, train_and_select_model
+from src.services.modeling_eligibility import (
+    get_exclusions,
+    modeling_eligible_mask,
+    summarize_modeling_population,
+)
 
 
 class RetailFlowState(BaseModel):
@@ -40,6 +45,7 @@ class RetailFlowState(BaseModel):
     validation_warnings: list[str] = Field(default_factory=list)
     selected_model_name: str = ""
     candidate_metrics: dict[str, dict[str, float]] = Field(default_factory=dict)
+    modeling_population: dict[str, Any] = Field(default_factory=dict)
     started_at: str = ""
     finished_at: str = ""
 
@@ -91,6 +97,19 @@ class RetailFlow(Flow[RetailFlowState]):
     def validate_contract_gate(self, _analyst_result: dict[str, Any]) -> str:
         validation = validate_contract(self.state.clean_data_path, self.state.contract_path)
 
+        # Modeling-eligibility concerns are a policy decision (src/services/
+        # modeling_eligibility.py), not a structural data-validity rule, so they
+        # are appended here as warnings rather than encoded into
+        # dataset_contract.json's structural bounds.
+        clean_df = pd.read_csv(self.state.clean_data_path)
+        for dept, exclusion in get_exclusions().items():
+            if "Dept" in clean_df.columns and (clean_df["Dept"] == dept).any():
+                validation["warnings"].append(
+                    f"Department {dept} is present and will be excluded from the predictive "
+                    f"modeling population (modeling-eligibility decision, not data cleaning): "
+                    f"{exclusion.reason}"
+                )
+
         self.state.contract_status = validation["status"]
         self.state.validation_errors = validation["errors"]
         self.state.validation_warnings = validation["warnings"]
@@ -120,10 +139,20 @@ class RetailFlow(Flow[RetailFlowState]):
         run_dir = Path(self.state.run_dir)
 
         clean_df = pd.read_csv(self.state.clean_data_path)
-        engineered = engineer_features(clean_df)
+
+        # Descriptive data (clean_data.csv on disk, insights.md, eda_report.html)
+        # already reflects the FULL department population and is never filtered
+        # here. Only the in-memory population handed to feature engineering /
+        # model training is restricted to the modeling-eligible departments --
+        # see src/services/modeling_eligibility.py for the policy and evidence.
+        modeling_population = summarize_modeling_population(clean_df)
+        eligible_df = clean_df[modeling_eligible_mask(clean_df)].copy()
+
+        engineered = engineer_features(eligible_df)
         feature_columns = get_feature_columns(engineered)
 
         training_result = train_and_select_model(engineered, feature_columns)
+        training_result["modeling_population"] = modeling_population
         save_artifacts(training_result, run_dir)
 
         contract = json.loads(Path(self.state.contract_path).read_text(encoding="utf-8"))
@@ -131,6 +160,7 @@ class RetailFlow(Flow[RetailFlowState]):
 
         self.state.selected_model_name = training_result["selected_model_name"]
         self.state.candidate_metrics = training_result["candidate_metrics"]
+        self.state.modeling_population = modeling_population
         self.state.status = "SCIENTIST_COMPLETE"
         return training_result
 

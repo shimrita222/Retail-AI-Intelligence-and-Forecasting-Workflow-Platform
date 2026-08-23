@@ -1,0 +1,38 @@
+{
+  "selected_model_name": "Ridge",
+  "candidate_metrics": {
+    "Ridge": {
+      "MAE": 1714.7853238492226,
+      "RMSE": 3067.9353304444294,
+      "R2": 0.9877743626204483
+    },
+    "RandomForestRegressor": {
+      "MAE": 1627.0419006940833,
+      "RMSE": 3132.012438962416,
+      "R2": 0.9872583384487524
+    }
+  },
+  "feature_columns": [
+    "IsHoliday",
+    "Size",
+    "Temperature",
+    "Fuel_Price",
+    "MarkDown1",
+    "MarkDown2",
+    "MarkDown3",
+    "MarkDown4",
+    "MarkDown5",
+    "CPI",
+    "Unemployment",
+    "Weekly_Sales_Lag1",
+    "Weekly_Sales_Lag4",
+    "Weekly_Sales_RollingMean4",
+    "Weekly_Sales_RollingStd4",
+    "Type_A",
+    "Type_B"
+  ],
+  "target_column": "Weekly_Sales",
+  "train_rows": 22857,
+  "test_rows": 5763,
+  "split_cutoff_date": "2012-04-13"
+}

@@ -72,6 +72,28 @@ def render_model_card_markdown(
             f"- Target `{contract['target_column']}` contract bounds: "
             f"[{contract['columns']['Weekly_Sales']['min']}, {contract['columns']['Weekly_Sales']['max']}]."
         )
+
+    modeling_population = training_result.get("modeling_population")
+    if modeling_population:
+        lines += ["", "## Modeling Population"]
+        lines.append(
+            f"- {modeling_population['total_clean_rows']:,} total descriptive rows; "
+            f"{modeling_population['eligible_rows']:,} eligible for predictive training; "
+            f"{modeling_population['excluded_rows']:,} excluded."
+        )
+        if modeling_population.get("excluded_departments"):
+            lines.append(
+                "- **Excluded departments** (modeling-eligibility decision, NOT a data-cleaning "
+                "decision -- these rows remain in clean_data.csv and all descriptive/EDA outputs):"
+            )
+            for dept in modeling_population["excluded_departments"]:
+                reason = modeling_population["exclusion_reasons"].get(dept, modeling_population["exclusion_reasons"].get(str(dept), ""))
+                lines.append(f"  - Department {dept}: excluded from the predictive training population. {reason}")
+        watchlist = modeling_population.get("watchlist") or {}
+        if watchlist:
+            lines.append("- **Documented (non-exclusionary) watchlist** -- retained for modeling:")
+            for dept, note in watchlist.items():
+                lines.append(f"  - Department {dept}: {note}")
     lines += [
         "",
         "## Selected Model & Performance",
@@ -128,7 +150,9 @@ def _build_crew(training_result: dict[str, Any], feature_columns: list[str]):
         description=(
             "These feature columns were already engineered deterministically in "
             "src/services/feature_pipeline.py (lag1/lag4 sales, rolling 4-week mean/std, "
-            "zero-filled markdowns, one-hot store type). Do not propose new features or change any "
+            "zero-filled markdowns with a companion `_was_missing` indicator per markdown column "
+            "so the model can distinguish an unrecorded value from an observed zero, one-hot store "
+            "type). Do not propose new features or change any "
             "of these; write a short markdown paragraph (4-6 sentences) explaining why this feature "
             f"set is appropriate for weekly retail forecasting.\n\nFEATURE_COLUMNS:\n{feature_columns}"
         ),

@@ -59,6 +59,6 @@
     "This is the same dataset distributed for the Walmart Recruiting - Store Sales Forecasting competition, re-hosted under CC0.",
     "Original filenames ('Features data set.csv', 'sales data-set.csv', 'stores data-set.csv') are renamed to canonical names (features.csv, train.csv, stores.csv) on ingestion into data/raw/.",
     "No rows, columns, or values are synthesized, substituted, or fabricated. Only the approved three source files are used.",
-    "MarkDown1-5 fields are largely absent prior to Nov 2011 (promotions were not tracked before that date); missing values are treated as 'no markdown active', not as data-quality defects."
+    "MarkDown1-5 fields are largely absent prior to Nov 2011. The Kaggle source documentation states only that MarkDown data is unavailable before that date and is not recorded for all stores at all times; it does not state what a missing value means for the underlying business event. This project therefore treats a missing MarkDown value as 'markdown information not recorded/unavailable for this Store-Date', not as an established fact that no promotion occurred and not as a data-quality defect. Do not equate NA with 'no promotion' without additional evidence."
   ]
 }

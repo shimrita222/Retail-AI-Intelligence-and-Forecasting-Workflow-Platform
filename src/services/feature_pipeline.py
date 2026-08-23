@@ -42,9 +42,17 @@ def _add_rolling_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _impute_markdowns(df: pd.DataFrame) -> pd.DataFrame:
+    """Zero-fill MarkDown nulls for modeling, but first record a
+    `{col}_was_missing` indicator per column so the model (and any later
+    inspection) can still distinguish "markdown information was not
+    recorded" from "an observed value of zero" -- the two are not the same
+    fact and must not be silently collapsed into one number. See
+    data/dataset_manifest.json for why NA must not be read as "no promotion".
+    """
     df = df.copy()
     for col in MARKDOWN_COLUMNS:
         if col in df.columns:
+            df[f"{col}_was_missing"] = df[col].isna().astype(int)
             df[col] = df[col].fillna(0.0)
     return df
 
