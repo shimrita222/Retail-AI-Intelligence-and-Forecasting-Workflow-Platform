@@ -23,15 +23,45 @@ from pydantic import BaseModel, Field
 
 from src.agents.analyst_crew import run_analyst_crew
 from src.agents.scientist_crew import run_scientist_crew
+from src.services.candidate_selection import PreTrainingGateResult, evaluate_pre_training_gate
 from src.services.contract_validator import validate_contract
 from src.services.data_ingestion import ingest_data
 from src.services.feature_pipeline import engineer_features, get_feature_columns
-from src.services.ml_trainer import save_artifacts, train_and_select_model
+from src.services.ml_trainer import (
+    ARTIFACT_GENERATION_FAILED,
+    ArtifactPersistenceError,
+    chronological_split,
+    save_artifacts,
+    train_and_select_model,
+)
 from src.services.modeling_eligibility import (
     get_exclusions,
     modeling_eligible_mask,
     summarize_modeling_population,
 )
+
+
+def run_dynamic_training_stage(engineered: pd.DataFrame, feature_columns: list[str]) -> dict[str, Any]:
+    """Core gate-then-train sequence, deliberately isolated from Flow/self.state
+    so it is directly unit-testable without a real CrewAI Flow run.
+
+    Evaluates the Pre-Training Candidate Gate (the single source of truth for
+    candidate eligibility/selection -- see src.services.candidate_selection)
+    and, ONLY on PASS, calls the generalized trainer with exactly
+    gate_result.selected_model_ids. Never calls select_candidates() itself,
+    never trains before a PASS gate, and never substitutes a different
+    candidate list than the one the gate approved.
+    """
+    train_df, _test_df, _cutoff_date = chronological_split(engineered)
+    gate_result = evaluate_pre_training_gate(train_row_count=len(train_df))
+
+    if gate_result.status != "PASS":
+        return {"gate_result": gate_result, "training_result": None}
+
+    training_result = train_and_select_model(
+        engineered, feature_columns, selected_model_ids=list(gate_result.selected_model_ids)
+    )
+    return {"gate_result": gate_result, "training_result": training_result}
 
 
 class RetailFlowState(BaseModel):
@@ -46,6 +76,17 @@ class RetailFlowState(BaseModel):
     selected_model_name: str = ""
     candidate_metrics: dict[str, dict[str, float]] = Field(default_factory=dict)
     modeling_population: dict[str, Any] = Field(default_factory=dict)
+    candidate_gate_status: str = ""
+    candidate_gate_target_count: int = 0
+    selected_model_ids: list[str] = Field(default_factory=list)
+    candidate_gate_reason_code: str | None = None
+    candidate_gate_reason_params: dict[str, Any] = Field(default_factory=dict)
+    post_training_viability_status: str = ""
+    post_training_viability_reason_code: str | None = None
+    post_training_viability_reason_params: dict[str, Any] = Field(default_factory=dict)
+    usable_candidates: list[str] = Field(default_factory=list)
+    artifact_failure_reason_code: str | None = None
+    artifact_failure_reason_params: dict[str, Any] = Field(default_factory=dict)
     started_at: str = ""
     finished_at: str = ""
 
@@ -127,7 +168,12 @@ class RetailFlow(Flow[RetailFlowState]):
 
     @listen("FAIL")
     def handle_validation_failure(self) -> dict[str, Any]:
-        self._write_run_metadata()
+        try:
+            self._write_run_metadata()
+        except ArtifactPersistenceError as exc:
+            self.state.status = "ARTIFACT_FAILED"
+            self.state.artifact_failure_reason_code = exc.reason_code
+            self.state.artifact_failure_reason_params = exc.reason_params
         return {
             "run_id": self.state.run_id,
             "status": self.state.status,
@@ -151,12 +197,74 @@ class RetailFlow(Flow[RetailFlowState]):
         engineered = engineer_features(eligible_df)
         feature_columns = get_feature_columns(engineered)
 
-        training_result = train_and_select_model(engineered, feature_columns)
-        training_result["modeling_population"] = modeling_population
-        save_artifacts(training_result, run_dir)
+        stage_result = run_dynamic_training_stage(engineered, feature_columns)
+        gate_result: PreTrainingGateResult = stage_result["gate_result"]
 
-        contract = json.loads(Path(self.state.contract_path).read_text(encoding="utf-8"))
-        run_scientist_crew(training_result, run_dir, contract=contract)
+        self.state.candidate_gate_status = gate_result.status
+        self.state.candidate_gate_target_count = gate_result.target_candidate_count
+        self.state.selected_model_ids = list(gate_result.selected_model_ids)
+        self.state.candidate_gate_reason_code = gate_result.reason_code
+        self.state.candidate_gate_reason_params = gate_result.reason_params or {}
+
+        if gate_result.status != "PASS":
+            # Pre-Training Gate FAIL: halt before training. No trainer call,
+            # no artifacts, no Scientist Crew narration for this run.
+            self.state.status = "GATE_FAILED"
+            return {
+                "run_id": self.state.run_id,
+                "status": self.state.status,
+                "gate_reason_code": gate_result.reason_code,
+                "gate_reason_params": gate_result.reason_params,
+            }
+
+        training_result = stage_result["training_result"]
+        viability = training_result["post_training_viability"]
+
+        self.state.post_training_viability_status = viability["status"]
+        self.state.post_training_viability_reason_code = viability["reason_code"]
+        self.state.post_training_viability_reason_params = viability["reason_params"] or {}
+        self.state.usable_candidates = list(training_result["usable_candidates"])
+
+        if viability["status"] != "PASS":
+            # Checkpoint 2 (Post-Training Comparison Viability Check) FAIL:
+            # enough candidates were eligible/selected pre-training, but too
+            # few survived execution to compare. No winner may be declared;
+            # halt before artifact serialization and Scientist Crew
+            # narration for this run. Distinct from a Pre-Training Gate
+            # failure -- a different lifecycle stage, a different
+            # reason_code, a different terminal status.
+            self.state.status = "VIABILITY_FAILED"
+            return {
+                "run_id": self.state.run_id,
+                "status": self.state.status,
+                "viability_reason_code": viability["reason_code"],
+                "viability_reason_params": viability["reason_params"],
+            }
+
+        training_result["modeling_population"] = modeling_population
+        try:
+            # Both the model/evaluation-report artifacts (save_artifacts) and
+            # the narrative report/model-card artifacts (run_scientist_crew)
+            # are required non-model artifacts for this run; either one
+            # failing to persist is an artifact-generation failure, not a
+            # model-selection failure. The winner decided above
+            # (training_result["selected_model_name"]) is never revisited or
+            # changed. A partial artifact set (e.g. evaluation_report.json
+            # written, but model_card.md failing afterward) is never
+            # represented as a successful run.
+            save_artifacts(training_result, run_dir)
+            contract = json.loads(Path(self.state.contract_path).read_text(encoding="utf-8"))
+            run_scientist_crew(training_result, run_dir, contract=contract)
+        except ArtifactPersistenceError as exc:
+            self.state.status = "ARTIFACT_FAILED"
+            self.state.artifact_failure_reason_code = exc.reason_code
+            self.state.artifact_failure_reason_params = exc.reason_params
+            return {
+                "run_id": self.state.run_id,
+                "status": self.state.status,
+                "artifact_failure_reason_code": exc.reason_code,
+                "artifact_failure_reason_params": exc.reason_params,
+            }
 
         self.state.selected_model_name = training_result["selected_model_name"]
         self.state.candidate_metrics = training_result["candidate_metrics"]
@@ -166,15 +274,37 @@ class RetailFlow(Flow[RetailFlowState]):
 
     @listen(run_scientist_stage)
     def finalize_flow(self, _training_result: dict[str, Any]) -> dict[str, Any]:
-        self.state.status = "COMPLETED"
-        return self._write_run_metadata()
+        if self.state.status not in ("GATE_FAILED", "VIABILITY_FAILED", "ARTIFACT_FAILED"):
+            self.state.status = "COMPLETED"
+        try:
+            return self._write_run_metadata()
+        except ArtifactPersistenceError as exc:
+            # run_metadata.json is a required traceability artifact; a
+            # write failure here must never leave a run misrepresented as
+            # COMPLETED, even though this specific failure can't itself be
+            # durably recorded to the very file that failed to write.
+            self.state.status = "ARTIFACT_FAILED"
+            self.state.artifact_failure_reason_code = exc.reason_code
+            self.state.artifact_failure_reason_params = exc.reason_params
+            return {
+                "run_id": self.state.run_id,
+                "status": self.state.status,
+                "artifact_failure_reason_code": exc.reason_code,
+                "artifact_failure_reason_params": exc.reason_params,
+            }
 
     def _write_run_metadata(self) -> dict[str, Any]:
         self.state.finished_at = datetime.now(timezone.utc).isoformat()
         metadata = self.state.model_dump()
         metadata_path = Path(self.state.run_dir) / "run_metadata.json"
-        with metadata_path.open("w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2)
+        try:
+            with metadata_path.open("w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2)
+        except Exception as exc:  # noqa: BLE001 - filesystem I/O failure while writing the required run_metadata.json
+            raise ArtifactPersistenceError(
+                ARTIFACT_GENERATION_FAILED,
+                {"artifact": "run_metadata.json", "stage": "run_metadata_write", "exception_type": exc.__class__.__name__},
+            ) from exc
         return metadata
 
 

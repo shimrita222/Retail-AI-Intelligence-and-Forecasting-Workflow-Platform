@@ -1,0 +1,10 @@
+# Optional third-party model dependencies for src/services/model_registry.py.
+# Not required to run the application or the base test suite: every model_id
+# in MODEL_REGISTRY whose factory imports one of these packages degrades to
+# "unavailable" (reason_code="dependency_unavailable") when the package is
+# not installed, rather than failing at import time.
+#
+# Install with: pip install -r requirements-optional.txt
+xgboost
+lightgbm
+catboost

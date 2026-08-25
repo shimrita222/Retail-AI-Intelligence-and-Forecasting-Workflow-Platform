@@ -15,6 +15,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from src.services.ml_trainer import ARTIFACT_GENERATION_FAILED, ArtifactPersistenceError
+
 
 def _metrics_table_markdown(candidate_metrics: dict[str, dict[str, float]], selected_model_name: str) -> str:
     lines = ["| Model | MAE | RMSE | R2 | Selected |", "|---|---|---|---|---|"]
@@ -46,9 +48,55 @@ def render_evaluation_report_markdown(
         f"**Selected model:** `{training_result['selected_model_name']}` "
         "(deterministically chosen: lowest RMSE on the chronological test split).",
     ]
+    tie_break = training_result.get("tie_break")
+    if tie_break:
+        params = tie_break["reason_params"]
+        tied = ", ".join(f"`{model_id}`" for model_id in params["tied_model_ids"])
+        lines.append(
+            f"- **Tie-break applied:** {tied} shared the exact lowest RMSE; resolved by "
+            f"`{params['criterion']}` -> `{params['winner']}`."
+        )
     if narrative:
         lines += ["", "## Model Evaluation Agent Narrative\n", narrative]
     return "\n".join(lines) + "\n"
+
+
+def _candidate_models_considered_lines(training_result: dict[str, Any]) -> list[str]:
+    """N-model-safe, data-driven "Candidate Models Considered" narration.
+
+    Reads only structured evidence already computed in training_result
+    (candidate_outcomes/usable_candidates) -- never recomputes, never
+    claims a fixed candidate count, and never claims "no other model
+    families were evaluated" merely because they were not part of this
+    run's approved candidate pool (other registered models may exist and
+    simply not have been selected for this run).
+    """
+    candidate_outcomes = training_result.get("candidate_outcomes")
+    if not candidate_outcomes:
+        # Backward-compatible fallback for older/synthetic training_result
+        # dicts that predate the candidate_outcomes field.
+        selected_ids = sorted(training_result["candidate_metrics"].keys())
+        return [f"Candidates compared in this run: {', '.join(f'`{model_id}`' for model_id in selected_ids)}."]
+
+    selected_ids = sorted(candidate_outcomes.keys())
+    usable_ids = sorted(training_result.get("usable_candidates", []))
+    excluded_ids = sorted(model_id for model_id in selected_ids if model_id not in usable_ids)
+
+    lines = [
+        f"{len(selected_ids)} candidate model(s) were selected for this run (deterministic pre-training "
+        "candidate selection, see src/services/candidate_selection.py): "
+        f"{', '.join(f'`{model_id}`' for model_id in selected_ids)}.",
+        "- **Usable for comparison:** "
+        + (", ".join(f"`{model_id}`" for model_id in usable_ids) if usable_ids else "none") + ".",
+    ]
+    if excluded_ids:
+        excluded_notes = [f"`{model_id}` (`{candidate_outcomes[model_id].reason_code}`)" for model_id in excluded_ids]
+        lines.append(f"- **Excluded from comparison:** {', '.join(excluded_notes)}.")
+    lines.append(
+        "- Other registered model families not selected for this run may exist in the model registry "
+        "(src/services/model_registry.py) but were not part of this run's approved candidate pool."
+    )
+    return lines
 
 
 def render_model_card_markdown(
@@ -105,8 +153,7 @@ def render_model_card_markdown(
         "in src/services/ml_trainer.py (no LLM involved in model choice or metric computation).",
         "",
         "## Candidate Models Considered",
-        "Exactly two candidates were trained and compared: `Ridge(alpha=1.0)` and "
-        "`RandomForestRegressor(n_estimators=100, random_state=42)`. No other model families were evaluated.",
+        *_candidate_models_considered_lines(training_result),
         "",
         "## Limitations",
         "- Trained on historical US retail data (2010-2012); may not generalize to other markets or eras.",
@@ -132,7 +179,7 @@ def _build_crew(training_result: dict[str, Any], feature_columns: list[str]):
 
     model_eval_agent = Agent(
         role="Model Evaluation Agent",
-        goal="Summarize the deterministic candidate comparison (Ridge vs RandomForest) without altering any metric.",
+        goal="Summarize the deterministic multi-candidate comparison without altering any metric or model choice.",
         backstory="A rigorous ML evaluator who reports exactly what the metrics say, no more and no less.",
         allow_delegation=False,
         verbose=False,
@@ -162,10 +209,12 @@ def _build_crew(training_result: dict[str, Any], feature_columns: list[str]):
 
     eval_task = Task(
         description=(
-            "This candidate comparison was already computed deterministically; do not recompute or "
-            "alter any numbers. Write a short markdown paragraph (4-6 sentences) summarizing the "
-            f"comparison and confirming the selection is justified by the metrics.\n\nRESULT:\n"
-            f"{json.dumps({'candidate_metrics': training_result['candidate_metrics'], 'selected_model_name': training_result['selected_model_name']}, indent=2)}"
+            "This candidate comparison, including which model won and any tie-break, was already "
+            "computed deterministically; do not recompute, alter, or override any number or the model "
+            "choice. Write a short markdown paragraph (4-6 sentences) summarizing the comparison and "
+            "confirming the selection is justified by the metrics. If a tie-break is present in the "
+            "evidence below, mention it factually without editorializing.\n\nRESULT:\n"
+            f"{json.dumps({'candidate_metrics': training_result['candidate_metrics'], 'selected_model_name': training_result['selected_model_name'], 'tie_break': training_result.get('tie_break')}, indent=2)}"
         ),
         expected_output="A short markdown paragraph.",
         agent=model_eval_agent,
@@ -222,11 +271,23 @@ def run_scientist_crew(
     )
     eval_report_md = render_evaluation_report_markdown(training_result, combined_eval_narrative or None)
     eval_report_path = run_dir / "evaluation_report.md"
-    eval_report_path.write_text(eval_report_md, encoding="utf-8")
+    try:
+        eval_report_path.write_text(eval_report_md, encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001 - filesystem I/O failure, distinct from the LLM-failure branch above
+        raise ArtifactPersistenceError(
+            ARTIFACT_GENERATION_FAILED,
+            {"artifact": "evaluation_report.md", "stage": "markdown_write", "exception_type": exc.__class__.__name__},
+        ) from exc
 
     model_card_md = render_model_card_markdown(training_result, contract, narratives.get("model_governance"))
     model_card_path = run_dir / "model_card.md"
-    model_card_path.write_text(model_card_md, encoding="utf-8")
+    try:
+        model_card_path.write_text(model_card_md, encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001 - filesystem I/O failure, distinct from the LLM-failure branch above
+        raise ArtifactPersistenceError(
+            ARTIFACT_GENERATION_FAILED,
+            {"artifact": "model_card.md", "stage": "markdown_write", "exception_type": exc.__class__.__name__},
+        ) from exc
 
     return {
         "evaluation_report_path": eval_report_path,
