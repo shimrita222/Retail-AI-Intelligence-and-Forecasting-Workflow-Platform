@@ -26,3 +26,37 @@ jobs:
 
       - name: Run tests
         run: pytest tests/ -v
+
+  test-optional:
+    # Optional-dependency leg: installs requirements-optional.txt on top of
+    # the core requirements and proves real (non-mocked) training/evaluation
+    # through at least one real external adapter (XGBoost). The default
+    # `test` job above must remain the only job required for the core app
+    # to be proven working -- this job is additive verification, not a
+    # replacement, and never makes optional packages mandatory for the app.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install core and optional dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-optional.txt
+
+      - name: Verify optional ML dependencies actually import
+        # Explicit availability check so a silently-failed pip install can
+        # never be masked by pytest's dependency-absence skip in
+        # tests/test_optional_xgboost_adapter.py -- this step fails the job
+        # outright if xgboost/lightgbm/catboost are not genuinely importable.
+        run: python -c "import xgboost, lightgbm, catboost; print('optional ML dependencies import OK')"
+
+      - name: Run tests with optional dependencies installed
+        run: pytest tests/ -v
