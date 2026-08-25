@@ -75,6 +75,10 @@ class RetailFlowState(BaseModel):
     selected_model_ids: list[str] = Field(default_factory=list)
     candidate_gate_reason_code: str | None = None
     candidate_gate_reason_params: dict[str, Any] = Field(default_factory=dict)
+    post_training_viability_status: str = ""
+    post_training_viability_reason_code: str | None = None
+    post_training_viability_reason_params: dict[str, Any] = Field(default_factory=dict)
+    usable_candidates: list[str] = Field(default_factory=list)
     started_at: str = ""
     finished_at: str = ""
 
@@ -201,6 +205,29 @@ class RetailFlow(Flow[RetailFlowState]):
             }
 
         training_result = stage_result["training_result"]
+        viability = training_result["post_training_viability"]
+
+        self.state.post_training_viability_status = viability["status"]
+        self.state.post_training_viability_reason_code = viability["reason_code"]
+        self.state.post_training_viability_reason_params = viability["reason_params"] or {}
+        self.state.usable_candidates = list(training_result["usable_candidates"])
+
+        if viability["status"] != "PASS":
+            # Checkpoint 2 (Post-Training Comparison Viability Check) FAIL:
+            # enough candidates were eligible/selected pre-training, but too
+            # few survived execution to compare. No winner may be declared;
+            # halt before artifact serialization and Scientist Crew
+            # narration for this run. Distinct from a Pre-Training Gate
+            # failure -- a different lifecycle stage, a different
+            # reason_code, a different terminal status.
+            self.state.status = "VIABILITY_FAILED"
+            return {
+                "run_id": self.state.run_id,
+                "status": self.state.status,
+                "viability_reason_code": viability["reason_code"],
+                "viability_reason_params": viability["reason_params"],
+            }
+
         training_result["modeling_population"] = modeling_population
         save_artifacts(training_result, run_dir)
 
@@ -215,7 +242,7 @@ class RetailFlow(Flow[RetailFlowState]):
 
     @listen(run_scientist_stage)
     def finalize_flow(self, _training_result: dict[str, Any]) -> dict[str, Any]:
-        if self.state.status != "GATE_FAILED":
+        if self.state.status not in ("GATE_FAILED", "VIABILITY_FAILED"):
             self.state.status = "COMPLETED"
         return self._write_run_metadata()
 

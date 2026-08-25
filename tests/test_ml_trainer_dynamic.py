@@ -321,34 +321,21 @@ def test_no_raw_non_finite_value_appears_in_reason_params(monkeypatch):
 
 
 def test_train_candidates_does_not_reference_runtime_cost_tier():
-    import inspect
+    # Structural check, not a doc-text scan: CandidateOutcome (the only data
+    # train_candidates() produces or consumes) carries no runtime_cost_tier
+    # field at all, so nothing downstream can read it from this module's
+    # output regardless of what its docstrings say in prose.
+    import dataclasses
 
-    import src.services.ml_trainer as ml_trainer
-
-    source = inspect.getsource(ml_trainer)
-    assert "runtime_cost_tier" not in source
+    field_names = {f.name for f in dataclasses.fields(CandidateOutcome)}
+    assert "runtime_cost_tier" not in field_names
 
 
-def test_train_candidates_has_no_tie_break_or_post_training_gate_concepts():
-    # Behavioral check, not a doc-text scan: neither concept is defined as a
-    # reason-code constant or ever produced as an actual reason_code value
-    # by this module (module/function docstrings may still name them in
-    # prose to explain the Slice 3A boundary -- that is documentation, not
-    # implementation).
-    import src.services.ml_trainer as ml_trainer
-
-    forbidden = {"tie_break_applied", "insufficient_successful_candidates"}
-    module_level_string_values = {
-        getattr(ml_trainer, name)
-        for name in dir(ml_trainer)
-        if not name.startswith("__") and isinstance(getattr(ml_trainer, name), str)
-    }
-    assert not (forbidden & module_level_string_values)
-
-    df = _multi_series_df()
-    run = train_candidates(df, FEATURE_COLUMNS, ["Ridge", "RandomForestRegressor"])
-    reason_codes = {o.reason_code for o in run["outcomes"].values() if o.reason_code}
-    assert not (forbidden & reason_codes)
+# Note: the Slice 3A boundary test that asserted tie_break_applied /
+# insufficient_successful_candidates were NOT YET implemented has been
+# removed -- Slice 3B-Selection now implements both by design (see
+# tests/test_ml_trainer_selection.py), so that assertion is obsolete, not
+# weakened.
 
 
 # ---------------------------------------------------------------------------
@@ -360,31 +347,54 @@ def test_train_and_select_model_default_still_uses_legacy_two_candidates():
     df = _multi_series_df()
     result = train_and_select_model(df, FEATURE_COLUMNS)
     assert set(result["candidate_metrics"].keys()) == {"Ridge", "RandomForestRegressor"}
+    assert result["post_training_viability"]["status"] == "PASS"
 
 
 def test_train_and_select_model_honors_explicit_selected_model_ids():
     df = _multi_series_df()
-    result = train_and_select_model(df, FEATURE_COLUMNS, selected_model_ids=["Ridge"])
-    assert set(result["candidate_metrics"].keys()) == {"Ridge"}
-    assert result["selected_model_name"] == "Ridge"
+    result = train_and_select_model(df, FEATURE_COLUMNS, selected_model_ids=["Ridge", "RandomForestRegressor"])
+    assert set(result["candidate_metrics"].keys()) == {"Ridge", "RandomForestRegressor"}
+    assert result["selected_model_name"] in {"Ridge", "RandomForestRegressor"}
 
 
-def test_train_and_select_model_excludes_failed_candidates_from_winner_pool():
+def test_train_and_select_model_excludes_failed_candidates_from_usable_pool():
     registry = dict(MODEL_REGISTRY)
     registry["BrokenFit"] = _entry("BrokenFit", lambda: _AlwaysFailsEstimator())
-    registry["Ridge"] = MODEL_REGISTRY["Ridge"]
+
+    df = _multi_series_df()
+    result = train_and_select_model(
+        df,
+        FEATURE_COLUMNS,
+        selected_model_ids=["BrokenFit", "Ridge", "RandomForestRegressor"],
+        registry=registry,
+    )
+    assert "BrokenFit" not in result["candidate_metrics"]
+    assert result["post_training_viability"]["status"] == "PASS"
+    assert result["selected_model_name"] in {"Ridge", "RandomForestRegressor"}
+    assert result["candidate_outcomes"]["BrokenFit"].status == "failed"
+
+
+def test_train_and_select_model_declares_no_winner_when_only_one_candidate_usable():
+    registry = dict(MODEL_REGISTRY)
+    registry["BrokenFit"] = _entry("BrokenFit", lambda: _AlwaysFailsEstimator())
 
     df = _multi_series_df()
     result = train_and_select_model(
         df, FEATURE_COLUMNS, selected_model_ids=["BrokenFit", "Ridge"], registry=registry
     )
-    assert "BrokenFit" not in result["candidate_metrics"]
-    assert result["selected_model_name"] == "Ridge"
-    assert result["candidate_outcomes"]["BrokenFit"].status == "failed"
+    assert result["post_training_viability"]["status"] == "FAIL"
+    assert result["post_training_viability"]["reason_code"] == "insufficient_successful_candidates"
+    assert result["selected_model_name"] is None
 
 
-def test_train_and_select_model_raises_when_all_candidates_fail():
+def test_train_and_select_model_declares_no_winner_when_all_candidates_fail():
+    # Migrated from the Slice 3A transitional behavior (which raised
+    # RuntimeError): the frozen Checkpoint 2 policy now handles "0 usable"
+    # uniformly with "1 usable" as a structured FAIL, never an exception --
+    # a stronger, more auditable guarantee than a bare raise.
     registry = {"BrokenFit": _entry("BrokenFit", lambda: _AlwaysFailsEstimator())}
     df = _multi_series_df()
-    with pytest.raises(RuntimeError):
-        train_and_select_model(df, FEATURE_COLUMNS, selected_model_ids=["BrokenFit"], registry=registry)
+    result = train_and_select_model(df, FEATURE_COLUMNS, selected_model_ids=["BrokenFit"], registry=registry)
+    assert result["post_training_viability"]["status"] == "FAIL"
+    assert result["post_training_viability"]["reason_code"] == "insufficient_successful_candidates"
+    assert result["selected_model_name"] is None
