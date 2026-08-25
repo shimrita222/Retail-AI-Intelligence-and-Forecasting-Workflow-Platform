@@ -30,6 +30,16 @@ authoritative, frozen Phase 3 final selection algorithm -- the Slice 3A
 transitional plain-`min()` winner path has been fully replaced, not kept
 alongside it. There is exactly one winner-selection authority in this
 module.
+
+Slice 3C-Artifacts adds: (1) additive Phase 3 selection metadata in the
+persisted `evaluation_report.json` (usable candidates, viability result,
+tie-break, and a JSON-safe summary of every candidate outcome -- never raw
+fitted-model objects, exception objects, or non-finite floats); and (2) the
+frozen artifact-failure boundary (`ArtifactPersistenceError`,
+`artifact_serialization_failed` / `artifact_generation_failed`) around
+`save_artifacts()`. Artifact failures are infrastructure/pipeline failures,
+never model-selection failures -- the in-memory winner decision made above
+is never revisited or changed because persistence failed afterward.
 """
 
 from __future__ import annotations
@@ -73,6 +83,12 @@ UNKNOWN_MODEL_ID = "unknown_model_id"
 INSUFFICIENT_SUCCESSFUL_CANDIDATES = "insufficient_successful_candidates"
 TIE_BREAK_APPLIED = "tie_break_applied"
 
+# Artifact-failure reason codes: infrastructure/pipeline failures, distinct
+# from every model-selection reason code above. FAIL + HALT; the winner
+# decision already made in-memory is never changed because of these.
+ARTIFACT_SERIALIZATION_FAILED = "artifact_serialization_failed"
+ARTIFACT_GENERATION_FAILED = "artifact_generation_failed"
+
 # Frozen minimum: a single usable candidate is never sufficient for a
 # comparison, so no winner may be declared from one remaining model. See
 # Obsidian "Retail AI Intelligence - Phase 3 Dynamic Model Selection.md",
@@ -99,6 +115,19 @@ class PostTrainingViabilityResult:
     failed_model_ids: tuple[str, ...]
     reason_code: str | None
     reason_params: dict[str, Any] | None
+
+
+class ArtifactPersistenceError(Exception):
+    """Structured artifact-failure signal for save_artifacts(). Carries the
+    same reason_code/reason_params shape used throughout this module so
+    callers (RetailFlow) can handle it identically to a gate/viability FAIL,
+    without ever changing the already-decided winner.
+    """
+
+    def __init__(self, reason_code: str, reason_params: dict[str, Any]) -> None:
+        self.reason_code = reason_code
+        self.reason_params = reason_params
+        super().__init__(f"{reason_code}: {reason_params}")
 
 
 def chronological_split(
@@ -366,15 +395,23 @@ def train_and_select_model(
     return result
 
 
-def save_artifacts(result: dict[str, Any], output_dir: str | Path) -> dict[str, Path]:
-    """Persist the selected model (.joblib) and a JSON evaluation report."""
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+def _serialize_candidate_outcome(outcome: CandidateOutcome) -> dict[str, Any]:
+    """JSON-safe audit summary of one candidate outcome: model_id, status,
+    metrics (only when successful -- already guaranteed finite), and
+    reason_code/reason_params when failed/unusable. Never includes the
+    fitted model object, a raw exception object, or arbitrary repr() output.
+    """
+    return {
+        "model_id": outcome.model_id,
+        "status": outcome.status,
+        "metrics": outcome.metrics,
+        "reason_code": outcome.reason_code,
+        "reason_params": outcome.reason_params,
+    }
 
-    model_path = output_dir / "selected_model.joblib"
-    joblib.dump(result["fitted_models"][result["selected_model_name"]], model_path)
 
-    report = {
+def _build_evaluation_report(result: dict[str, Any]) -> dict[str, Any]:
+    report: dict[str, Any] = {
         "selected_model_name": result["selected_model_name"],
         "candidate_metrics": result["candidate_metrics"],
         "feature_columns": result["feature_columns"],
@@ -382,11 +419,54 @@ def save_artifacts(result: dict[str, Any], output_dir: str | Path) -> dict[str, 
         "train_rows": result["train_rows"],
         "test_rows": result["test_rows"],
         "split_cutoff_date": result["split_cutoff_date"],
+        # Additive Phase 3 selection metadata -- language-neutral (reason_code
+        # + reason_params), never English-prose-only decision state.
+        "usable_candidates": list(result.get("usable_candidates", [])),
+        "post_training_viability": result.get("post_training_viability"),
+        "tie_break": result.get("tie_break"),
+        "candidate_outcomes": {
+            model_id: _serialize_candidate_outcome(outcome)
+            for model_id, outcome in result.get("candidate_outcomes", {}).items()
+        },
     }
     if "modeling_population" in result:
         report["modeling_population"] = result["modeling_population"]
+    return report
+
+
+def save_artifacts(result: dict[str, Any], output_dir: str | Path) -> dict[str, Path]:
+    """Persist the selected model (.joblib) and a JSON evaluation report.
+
+    Raises `ArtifactPersistenceError` on failure -- never silently drops a
+    required artifact, never represents a partial artifact set as success,
+    and never changes `result["selected_model_name"]` (the winner was
+    already decided, in-memory, before this function was ever called).
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    model_path = output_dir / "selected_model.joblib"
+    try:
+        joblib.dump(result["fitted_models"][result["selected_model_name"]], model_path)
+    except Exception as exc:  # noqa: BLE001 - any serialization failure becomes a structured FAIL+HALT signal
+        raise ArtifactPersistenceError(
+            ARTIFACT_SERIALIZATION_FAILED,
+            {
+                "stage": "selected_model_serialization",
+                "model_id": result.get("selected_model_name"),
+                "exception_type": exc.__class__.__name__,
+            },
+        ) from exc
+
+    report = _build_evaluation_report(result)
     report_path = output_dir / "evaluation_report.json"
-    with report_path.open("w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2)
+    try:
+        with report_path.open("w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, allow_nan=False)
+    except Exception as exc:  # noqa: BLE001 - includes ValueError from allow_nan=False guarding non-finite leaks
+        raise ArtifactPersistenceError(
+            ARTIFACT_GENERATION_FAILED,
+            {"stage": "evaluation_report_write", "exception_type": exc.__class__.__name__},
+        ) from exc
 
     return {"model_path": model_path, "report_path": report_path}

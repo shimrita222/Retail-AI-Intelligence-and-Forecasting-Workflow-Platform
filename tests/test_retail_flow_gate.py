@@ -252,3 +252,156 @@ def test_flow_proceeds_to_artifacts_and_scientist_crew_on_viability_pass(tmp_pat
     assert flow.state.status == "SCIENTIST_COMPLETE"
     assert flow.state.selected_model_name == "Ridge"
     assert result["selected_model_name"] == "Ridge"
+
+
+# ---------------------------------------------------------------------------
+# Slice 3C-Artifacts: artifact-failure halt behavior in RetailFlow
+# ---------------------------------------------------------------------------
+
+
+def test_flow_halts_before_scientist_crew_on_artifact_failure(tmp_path, monkeypatch):
+    from src.services.ml_trainer import ArtifactPersistenceError
+
+    flow = _make_flow(tmp_path)
+    _patch_pipeline_stubs(monkeypatch)
+
+    pass_training_result = {
+        "selected_model_name": "Ridge",
+        "candidate_metrics": {"Ridge": {"MAE": 1.0, "RMSE": 1.0, "R2": 0.9}},
+        "fitted_models": {"Ridge": object()},
+        "usable_candidates": ("Ridge", "RandomForestRegressor"),
+        "tie_break": None,
+        "feature_columns": ["Store"],
+        "target_column": "Weekly_Sales",
+        "train_rows": 1,
+        "test_rows": 1,
+        "split_cutoff_date": "2010-01-01",
+        "post_training_viability": {"status": "PASS", "reason_code": None, "reason_params": None},
+    }
+    gate_result = _pass_gate_result(["Ridge", "RandomForestRegressor"])
+    monkeypatch.setattr(
+        retail_flow,
+        "run_dynamic_training_stage",
+        lambda engineered, cols: {"gate_result": gate_result, "training_result": pass_training_result},
+    )
+
+    def _broken_save_artifacts(*a, **k):
+        raise ArtifactPersistenceError("artifact_serialization_failed", {"stage": "selected_model_serialization"})
+
+    crew_calls = []
+    monkeypatch.setattr(retail_flow, "save_artifacts", _broken_save_artifacts)
+    monkeypatch.setattr(retail_flow, "run_scientist_crew", lambda *a, **k: crew_calls.append(True))
+
+    result = flow.run_scientist_stage()
+
+    assert crew_calls == []
+    assert flow.state.status == "ARTIFACT_FAILED"
+    assert flow.state.artifact_failure_reason_code == "artifact_serialization_failed"
+    assert result["status"] == "ARTIFACT_FAILED"
+    # Winner decided in-memory before persistence is never revisited/changed.
+    assert pass_training_result["selected_model_name"] == "Ridge"
+
+
+def test_finalize_flow_does_not_mark_artifact_failure_as_completed(tmp_path, monkeypatch):
+    from src.services.ml_trainer import ArtifactPersistenceError
+
+    flow = _make_flow(tmp_path)
+    _patch_pipeline_stubs(monkeypatch)
+
+    pass_training_result = {
+        "selected_model_name": "Ridge",
+        "candidate_metrics": {"Ridge": {"MAE": 1.0, "RMSE": 1.0, "R2": 0.9}},
+        "fitted_models": {"Ridge": object()},
+        "usable_candidates": ("Ridge", "RandomForestRegressor"),
+        "tie_break": None,
+        "feature_columns": ["Store"],
+        "target_column": "Weekly_Sales",
+        "train_rows": 1,
+        "test_rows": 1,
+        "split_cutoff_date": "2010-01-01",
+        "post_training_viability": {"status": "PASS", "reason_code": None, "reason_params": None},
+    }
+    gate_result = _pass_gate_result(["Ridge", "RandomForestRegressor"])
+    monkeypatch.setattr(
+        retail_flow,
+        "run_dynamic_training_stage",
+        lambda engineered, cols: {"gate_result": gate_result, "training_result": pass_training_result},
+    )
+    monkeypatch.setattr(
+        retail_flow,
+        "save_artifacts",
+        lambda *a, **k: (_ for _ in ()).throw(ArtifactPersistenceError("artifact_generation_failed", {})),
+    )
+    monkeypatch.setattr(retail_flow, "run_scientist_crew", lambda *a, **k: None)
+
+    training_result = flow.run_scientist_stage()
+    flow.finalize_flow(training_result)
+
+    assert flow.state.status == "ARTIFACT_FAILED"
+
+
+def test_flow_partial_artifact_set_when_report_json_succeeds_but_markdown_fails(tmp_path, monkeypatch):
+    from src.services.ml_trainer import ArtifactPersistenceError
+
+    flow = _make_flow(tmp_path)
+    _patch_pipeline_stubs(monkeypatch)
+
+    pass_training_result = {
+        "selected_model_name": "Ridge",
+        "candidate_metrics": {"Ridge": {"MAE": 1.0, "RMSE": 1.0, "R2": 0.9}},
+        "fitted_models": {"Ridge": object()},
+        "usable_candidates": ("Ridge", "RandomForestRegressor"),
+        "tie_break": None,
+        "feature_columns": ["Store"],
+        "target_column": "Weekly_Sales",
+        "train_rows": 1,
+        "test_rows": 1,
+        "split_cutoff_date": "2010-01-01",
+        "post_training_viability": {"status": "PASS", "reason_code": None, "reason_params": None},
+    }
+    gate_result = _pass_gate_result(["Ridge", "RandomForestRegressor"])
+    monkeypatch.setattr(
+        retail_flow,
+        "run_dynamic_training_stage",
+        lambda engineered, cols: {"gate_result": gate_result, "training_result": pass_training_result},
+    )
+
+    save_calls = []
+    monkeypatch.setattr(retail_flow, "save_artifacts", lambda *a, **k: save_calls.append(True))  # succeeds
+
+    def _broken_scientist_crew(*a, **k):
+        raise ArtifactPersistenceError("artifact_generation_failed", {"artifact": "model_card.md", "stage": "markdown_write"})
+
+    monkeypatch.setattr(retail_flow, "run_scientist_crew", _broken_scientist_crew)
+
+    result = flow.run_scientist_stage()
+
+    assert len(save_calls) == 1  # evaluation_report.json / model artifact step succeeded
+    assert flow.state.status == "ARTIFACT_FAILED"
+    assert result["status"] == "ARTIFACT_FAILED"
+    assert result["artifact_failure_reason_params"]["artifact"] == "model_card.md"
+    assert pass_training_result["selected_model_name"] == "Ridge"
+
+
+def test_finalize_flow_halts_on_run_metadata_write_failure(tmp_path, monkeypatch):
+    flow = _make_flow(tmp_path)
+    flow.state.status = "SCIENTIST_COMPLETE"
+    flow.state.selected_model_name = "Ridge"
+
+    original_open = retail_flow.Path.open
+
+    def _broken_open(self, *args, **kwargs):
+        if self.name == "run_metadata.json":
+            raise OSError("disk full (synthetic)")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(retail_flow.Path, "open", _broken_open)
+
+    result = flow.finalize_flow({})
+
+    assert flow.state.status == "ARTIFACT_FAILED"
+    assert result["status"] == "ARTIFACT_FAILED"
+    assert flow.state.artifact_failure_reason_code == "artifact_generation_failed"
+    assert flow.state.artifact_failure_reason_params["artifact"] == "run_metadata.json"
+    # The winner decided earlier in the run is untouched by this failure.
+    assert flow.state.selected_model_name == "Ridge"

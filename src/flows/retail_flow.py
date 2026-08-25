@@ -27,7 +27,13 @@ from src.services.candidate_selection import PreTrainingGateResult, evaluate_pre
 from src.services.contract_validator import validate_contract
 from src.services.data_ingestion import ingest_data
 from src.services.feature_pipeline import engineer_features, get_feature_columns
-from src.services.ml_trainer import chronological_split, save_artifacts, train_and_select_model
+from src.services.ml_trainer import (
+    ARTIFACT_GENERATION_FAILED,
+    ArtifactPersistenceError,
+    chronological_split,
+    save_artifacts,
+    train_and_select_model,
+)
 from src.services.modeling_eligibility import (
     get_exclusions,
     modeling_eligible_mask,
@@ -79,6 +85,8 @@ class RetailFlowState(BaseModel):
     post_training_viability_reason_code: str | None = None
     post_training_viability_reason_params: dict[str, Any] = Field(default_factory=dict)
     usable_candidates: list[str] = Field(default_factory=list)
+    artifact_failure_reason_code: str | None = None
+    artifact_failure_reason_params: dict[str, Any] = Field(default_factory=dict)
     started_at: str = ""
     finished_at: str = ""
 
@@ -160,7 +168,12 @@ class RetailFlow(Flow[RetailFlowState]):
 
     @listen("FAIL")
     def handle_validation_failure(self) -> dict[str, Any]:
-        self._write_run_metadata()
+        try:
+            self._write_run_metadata()
+        except ArtifactPersistenceError as exc:
+            self.state.status = "ARTIFACT_FAILED"
+            self.state.artifact_failure_reason_code = exc.reason_code
+            self.state.artifact_failure_reason_params = exc.reason_params
         return {
             "run_id": self.state.run_id,
             "status": self.state.status,
@@ -229,10 +242,29 @@ class RetailFlow(Flow[RetailFlowState]):
             }
 
         training_result["modeling_population"] = modeling_population
-        save_artifacts(training_result, run_dir)
-
-        contract = json.loads(Path(self.state.contract_path).read_text(encoding="utf-8"))
-        run_scientist_crew(training_result, run_dir, contract=contract)
+        try:
+            # Both the model/evaluation-report artifacts (save_artifacts) and
+            # the narrative report/model-card artifacts (run_scientist_crew)
+            # are required non-model artifacts for this run; either one
+            # failing to persist is an artifact-generation failure, not a
+            # model-selection failure. The winner decided above
+            # (training_result["selected_model_name"]) is never revisited or
+            # changed. A partial artifact set (e.g. evaluation_report.json
+            # written, but model_card.md failing afterward) is never
+            # represented as a successful run.
+            save_artifacts(training_result, run_dir)
+            contract = json.loads(Path(self.state.contract_path).read_text(encoding="utf-8"))
+            run_scientist_crew(training_result, run_dir, contract=contract)
+        except ArtifactPersistenceError as exc:
+            self.state.status = "ARTIFACT_FAILED"
+            self.state.artifact_failure_reason_code = exc.reason_code
+            self.state.artifact_failure_reason_params = exc.reason_params
+            return {
+                "run_id": self.state.run_id,
+                "status": self.state.status,
+                "artifact_failure_reason_code": exc.reason_code,
+                "artifact_failure_reason_params": exc.reason_params,
+            }
 
         self.state.selected_model_name = training_result["selected_model_name"]
         self.state.candidate_metrics = training_result["candidate_metrics"]
@@ -242,16 +274,37 @@ class RetailFlow(Flow[RetailFlowState]):
 
     @listen(run_scientist_stage)
     def finalize_flow(self, _training_result: dict[str, Any]) -> dict[str, Any]:
-        if self.state.status not in ("GATE_FAILED", "VIABILITY_FAILED"):
+        if self.state.status not in ("GATE_FAILED", "VIABILITY_FAILED", "ARTIFACT_FAILED"):
             self.state.status = "COMPLETED"
-        return self._write_run_metadata()
+        try:
+            return self._write_run_metadata()
+        except ArtifactPersistenceError as exc:
+            # run_metadata.json is a required traceability artifact; a
+            # write failure here must never leave a run misrepresented as
+            # COMPLETED, even though this specific failure can't itself be
+            # durably recorded to the very file that failed to write.
+            self.state.status = "ARTIFACT_FAILED"
+            self.state.artifact_failure_reason_code = exc.reason_code
+            self.state.artifact_failure_reason_params = exc.reason_params
+            return {
+                "run_id": self.state.run_id,
+                "status": self.state.status,
+                "artifact_failure_reason_code": exc.reason_code,
+                "artifact_failure_reason_params": exc.reason_params,
+            }
 
     def _write_run_metadata(self) -> dict[str, Any]:
         self.state.finished_at = datetime.now(timezone.utc).isoformat()
         metadata = self.state.model_dump()
         metadata_path = Path(self.state.run_dir) / "run_metadata.json"
-        with metadata_path.open("w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2)
+        try:
+            with metadata_path.open("w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2)
+        except Exception as exc:  # noqa: BLE001 - filesystem I/O failure while writing the required run_metadata.json
+            raise ArtifactPersistenceError(
+                ARTIFACT_GENERATION_FAILED,
+                {"artifact": "run_metadata.json", "stage": "run_metadata_write", "exception_type": exc.__class__.__name__},
+            ) from exc
         return metadata
 
 
