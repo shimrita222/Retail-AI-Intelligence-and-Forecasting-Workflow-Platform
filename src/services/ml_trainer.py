@@ -1,32 +1,72 @@
-"""Deterministic ML training/evaluation/selection engine.
+"""Deterministic ML training/evaluation engine.
 
-Trains exactly two candidate models (Ridge, RandomForestRegressor) on a
-chronological train/test split, evaluates MAE/RMSE/R2 on the held-out
-future weeks, and deterministically selects the candidate with the
-lowest RMSE. No LLM is involved in training, evaluation, or selection.
+Slice 3A generalizes this module to train an explicit, pre-approved list of
+model_ids (`selected_model_ids`), resolved through the single authoritative
+`src.services.model_registry.MODEL_REGISTRY`, with per-candidate failure
+isolation and non-finite-metric exclusion. No LLM is involved in training,
+evaluation, or any decision here.
+
+This module does NOT select candidates. Candidate eligibility/selection is
+decided exactly once, upstream, by
+`src.services.candidate_selection.evaluate_pre_training_gate()` (invoked by
+RetailFlow before this module is ever called). `train_candidates()` and
+`train_and_select_model()` below must never call `select_candidates()` or
+`evaluate_pre_training_gate()` themselves, and must never add, drop, or
+substitute a candidate beyond the exact `selected_model_ids` they were given.
+
+This module also does NOT implement the final frozen Phase 3 winner policy
+(lowest RMSE, tie -> model_id alphabetical) or the Post-Training Viability
+Check (`insufficient_successful_candidates`) -- both are Slice 3B-Selection's
+responsibility. `train_and_select_model()`'s winner logic (plain lowest-RMSE
+among successful candidates, Python `min()`'s incidental first-inserted-wins
+behavior on an exact tie) is preserved ONLY as a TRANSITIONAL, backward-
+compatible default for callers that do not yet pass `selected_model_ids`
+explicitly (i.e. pre-Slice-3 tests). It is explicitly NOT the frozen Phase 3
+winner rule.
 """
 
 from __future__ import annotations
 
 import json
+import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+from src.services.model_registry import MODEL_REGISTRY, ModelEntry
 
 TRAIN_FRACTION = 0.8
 TARGET_COLUMN = "Weekly_Sales"
 DATE_COLUMN = "Date"
 
-CANDIDATE_FACTORIES = {
-    "Ridge": lambda: Ridge(alpha=1.0),
-    "RandomForestRegressor": lambda: RandomForestRegressor(n_estimators=100, random_state=42),
-}
+# TRANSITIONAL ONLY: fixed default candidate list for legacy direct callers
+# of train_and_select_model() that do not pass selected_model_ids explicitly
+# (pre-Slice-3 tests/callers). This is a literal backward-compatibility
+# default, not a candidate-selection decision -- it never calls
+# select_candidates() or evaluate_pre_training_gate().
+_LEGACY_DEFAULT_MODEL_IDS: tuple[str, ...] = ("Ridge", "RandomForestRegressor")
+
+# Structured, language-neutral per-candidate failure reason codes.
+CANDIDATE_TRAINING_FAILED = "candidate_training_failed"
+NON_FINITE_METRIC = "non_finite_metric"
+UNKNOWN_MODEL_ID = "unknown_model_id"
+
+_METRIC_NAMES = ("MAE", "RMSE", "R2")
+
+
+@dataclass(frozen=True)
+class CandidateOutcome:
+    model_id: str
+    status: str  # "success" | "failed"
+    metrics: dict[str, float] | None
+    fitted_model: Any | None
+    reason_code: str | None
+    reason_params: dict[str, Any] | None
 
 
 def chronological_split(
@@ -58,41 +98,154 @@ def _evaluate(y_true: pd.Series, y_pred: np.ndarray) -> dict[str, float]:
     return {"MAE": mae, "RMSE": rmse, "R2": r2}
 
 
-def train_and_select_model(
+def _run_single_candidate(
+    model_id: str,
+    entry: ModelEntry | None,
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    X_test: pd.DataFrame,
+    y_test: pd.Series,
+) -> CandidateOutcome:
+    """Execute one pre-approved candidate in isolation: resolve -> construct
+    -> fit -> predict -> evaluate. Any failure at any stage, or a non-finite
+    metric, produces a structured "failed" outcome without raising -- the
+    caller is responsible for continuing with the remaining candidates.
+    """
+    if entry is None:
+        return CandidateOutcome(
+            model_id=model_id,
+            status="failed",
+            metrics=None,
+            fitted_model=None,
+            reason_code=UNKNOWN_MODEL_ID,
+            reason_params={"model_id": model_id},
+        )
+
+    stage = "construct"
+    try:
+        model = entry.factory()
+        stage = "fit"
+        model.fit(X_train, y_train)
+        stage = "predict"
+        predictions = model.predict(X_test)
+        stage = "evaluate"
+        metrics = _evaluate(y_test, predictions)
+    except Exception as exc:  # noqa: BLE001 - isolate any candidate failure, never abort the others
+        return CandidateOutcome(
+            model_id=model_id,
+            status="failed",
+            metrics=None,
+            fitted_model=None,
+            reason_code=CANDIDATE_TRAINING_FAILED,
+            reason_params={"model_id": model_id, "stage": stage, "exception_type": exc.__class__.__name__},
+        )
+
+    non_finite_metric_names = [name for name in _METRIC_NAMES if not math.isfinite(metrics[name])]
+    if non_finite_metric_names:
+        # Never coerce a non-finite value into a fake finite one, and never
+        # place the raw NaN/inf float into JSON-facing reason metadata.
+        return CandidateOutcome(
+            model_id=model_id,
+            status="failed",
+            metrics=None,
+            fitted_model=None,
+            reason_code=NON_FINITE_METRIC,
+            reason_params={"model_id": model_id, "non_finite_metric_names": non_finite_metric_names},
+        )
+
+    return CandidateOutcome(
+        model_id=model_id,
+        status="success",
+        metrics=metrics,
+        fitted_model=model,
+        reason_code=None,
+        reason_params=None,
+    )
+
+
+def train_candidates(
     df: pd.DataFrame,
     feature_columns: list[str],
+    selected_model_ids: list[str],
     target_column: str = TARGET_COLUMN,
+    registry: dict[str, ModelEntry] | None = None,
 ) -> dict[str, Any]:
-    """Fit both candidates on the chronological train split, evaluate on
-    the chronological test split, and deterministically pick the lowest-RMSE
-    candidate. Returns fitted models, per-candidate metrics, and split info.
+    """Deterministically execute exactly the pre-approved `selected_model_ids`.
+
+    Trains only what it is told to train -- never selects, never adds, never
+    substitutes a candidate. Isolates per-candidate construct/fit/predict/
+    evaluate failures and non-finite metrics so one bad candidate never
+    aborts the others. Returns raw per-candidate outcomes only; no winner is
+    chosen here (that is Slice 3B-Selection's responsibility).
     """
+    source = registry if registry is not None else MODEL_REGISTRY
     train_df, test_df, cutoff_date = chronological_split(df)
 
     X_train, y_train = train_df[feature_columns], train_df[target_column]
     X_test, y_test = test_df[feature_columns], test_df[target_column]
 
-    fitted_models: dict[str, Any] = {}
-    candidate_metrics: dict[str, dict[str, float]] = {}
-
-    for name, factory in CANDIDATE_FACTORIES.items():
-        model = factory()
-        model.fit(X_train, y_train)
-        predictions = model.predict(X_test)
-        candidate_metrics[name] = _evaluate(y_test, predictions)
-        fitted_models[name] = model
-
-    selected_name = min(candidate_metrics, key=lambda n: candidate_metrics[n]["RMSE"])
+    outcomes: dict[str, CandidateOutcome] = {}
+    for model_id in selected_model_ids:
+        entry = source.get(model_id)
+        outcomes[model_id] = _run_single_candidate(model_id, entry, X_train, y_train, X_test, y_test)
 
     return {
-        "selected_model_name": selected_name,
-        "fitted_models": fitted_models,
-        "candidate_metrics": candidate_metrics,
+        "outcomes": outcomes,
         "feature_columns": feature_columns,
         "target_column": target_column,
         "train_rows": int(len(train_df)),
         "test_rows": int(len(test_df)),
         "split_cutoff_date": str(cutoff_date.date()),
+    }
+
+
+def train_and_select_model(
+    df: pd.DataFrame,
+    feature_columns: list[str],
+    target_column: str = TARGET_COLUMN,
+    selected_model_ids: list[str] | None = None,
+    registry: dict[str, ModelEntry] | None = None,
+) -> dict[str, Any]:
+    """Backward-compatible entrypoint used by RetailFlow and existing tests.
+
+    `selected_model_ids`, when provided, must be the exact, already
+    gate-approved list from
+    `candidate_selection.evaluate_pre_training_gate().selected_model_ids` --
+    this function does not validate, re-select, or second-guess that list.
+
+    TRANSITIONAL: if `selected_model_ids` is omitted, defaults to the legacy
+    two-candidate list (`_LEGACY_DEFAULT_MODEL_IDS`) for callers that predate
+    Slice 3 -- this is a fixed literal default, not a selection decision, and
+    never calls select_candidates()/evaluate_pre_training_gate(). The winner
+    chosen below (lowest RMSE among successful, finite candidates) is a
+    TRANSITIONAL selection, not the frozen Phase 3 final winner policy (RMSE
+    ascending, tie -> model_id alphabetical), which Slice 3B-Selection will
+    implement.
+    """
+    ids = list(selected_model_ids) if selected_model_ids is not None else list(_LEGACY_DEFAULT_MODEL_IDS)
+    run = train_candidates(df, feature_columns, ids, target_column=target_column, registry=registry)
+    outcomes = run["outcomes"]
+
+    successful = {model_id: outcome for model_id, outcome in outcomes.items() if outcome.status == "success"}
+    if not successful:
+        raise RuntimeError(
+            "train_and_select_model: no candidate succeeded "
+            f"(outcomes={ {model_id: outcome.reason_code for model_id, outcome in outcomes.items()} })"
+        )
+
+    # TRANSITIONAL winner selection -- see module/function docstrings.
+    selected_name = min(successful, key=lambda model_id: successful[model_id].metrics["RMSE"])
+
+    return {
+        "selected_model_name": selected_name,
+        "fitted_models": {model_id: outcome.fitted_model for model_id, outcome in successful.items()},
+        "candidate_metrics": {model_id: outcome.metrics for model_id, outcome in successful.items()},
+        "candidate_outcomes": outcomes,  # additive: full per-candidate audit trail, including failures
+        "feature_columns": run["feature_columns"],
+        "target_column": run["target_column"],
+        "train_rows": run["train_rows"],
+        "test_rows": run["test_rows"],
+        "split_cutoff_date": run["split_cutoff_date"],
     }
 
 
