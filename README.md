@@ -160,6 +160,56 @@ print(final_state.status)          # COMPLETED or FAILED
 print(final_state.run_dir)         # artifacts/<run_id>
 ```
 
+## Supabase (Phase 4A — staging foundation validated)
+
+**Status: an isolated Supabase STAGING project ("Retail AI Intelligence -
+Staging") exists and has both Phase 4A migrations applied and live-verified
+(base schema + a Data API grants correction). None of this is wired into
+`app.py` yet.** See `CLAUDE.md` and the Obsidian Phase 4A specification for
+the full architecture; this section documents the required workflow.
+
+**Required project workflow:** Supabase CLI + Supabase Skill, targeting the
+isolated Supabase Staging project. Docker/local Supabase is an **optional**
+local-validation path only — it is not an MVP dependency and is currently
+deferred (host/network image-pull blocker for the local Postgres image; not
+a schema/RLS/application defect).
+
+```bash
+# Required workflow -- CLI, against the linked STAGING project:
+supabase link --project-ref <staging-ref>
+supabase db push --linked           # applies supabase/migrations/*.sql to STAGING
+supabase migration list --linked    # verify Local/Remote match
+
+# Optional local-validation path (currently deferred, not required for MVP):
+supabase init
+supabase start                      # requires Docker Desktop
+supabase db reset                   # applies migrations to the local DB
+supabase status                     # prints local API URL / anon key for .env
+```
+
+Copy `.env.example` to `.env` (already gitignored) and fill in `SUPABASE_URL`
+/ `SUPABASE_ANON_KEY` — from the staging project's own API settings for
+staging work, or from `supabase status` output if using the optional local
+path. `SUPABASE_SERVICE_ROLE_KEY` is backend-only — never put it anywhere a
+frontend build or a CrewAI agent can read it. `APP_ENV=staging` when pointed
+at the staging project.
+
+Application Production uses a completely separate Supabase project and
+remains out of scope; it has not been created or touched. A full-dataset
+end-to-end integration run (Phase 3B) remains deferred and is a required
+gate before Production, per `CLAUDE.md`.
+
+The persistence abstraction lives in `src/persistence/` (`interfaces.py`,
+`supabase_client.py`, `supabase_repository.py`) and is independently tested
+against a fake client in `tests/test_supabase_repository.py` — it does not
+require Docker/a live Supabase instance to test, but does require one (the
+staging project, or optionally local Docker) to actually exercise
+migrations/RLS end-to-end.
+
+Legacy `config.yaml` + SHA-256 login remains the active authentication
+method until Supabase Auth passes its own acceptance gate (see the Phase 4A
+Obsidian spec) — nothing here replaces it yet.
+
 ## Testing
 
 ```bash

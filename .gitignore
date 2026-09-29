@@ -4,6 +4,8 @@ venv/
 env/
 .env
 .env.*
+# .env.example documents variable NAMES only (no real values) -- keep tracked.
+!.env.example
 
 # Python
 __pycache__/
