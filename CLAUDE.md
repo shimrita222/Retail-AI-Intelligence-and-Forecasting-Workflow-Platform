@@ -134,14 +134,14 @@ Do not implement future roadmap phases opportunistically.
 Completed:
 - Phase 1 — Architecture Specification
 - Phase 2 — Correctness Remediation, merged into `dev`
+- Phase 3 — Dynamic Model Strategy (2–3 model selection), merged into `dev` (PR #6)
+- Phase 4A — Supabase Persistence Foundation (STAGING schema, RLS, repository layer; live-validated; not yet wired into app.py), merged into `dev` (PR #7)
 
 Future capabilities require explicit scoping before implementation, including:
-- Supabase data integration
-- Supabase Auth
+- Supabase Auth & Application Integration — Phase 4B planned and scoped; implementation not yet started
 - generic external data connectors
 - expanded Analyst Crew
 - expanded Scientist Crew
-- dynamic 2–3 ML model selection
 - frontend/backend separation
 - Railway deployment
 - generic-dataset architecture
