@@ -104,24 +104,51 @@ else:  # "legacy"
 
 
 class _ListLogHandler(logging.Handler):
-    def __init__(self, sink: list[str]) -> None:
+    def __init__(self, sink: list[str], redact: str | None = None) -> None:
         super().__init__()
         self.sink = sink
+        self._redact = redact
 
     def emit(self, record: logging.LogRecord) -> None:
-        self.sink.append(self.format(record))
+        message = self.format(record)
+        if self._redact:
+            message = message.replace(self._redact, "<redacted>")
+        self.sink.append(message)
 
 
-def _execute_flow(run_id: str, entry: dict[str, Any]) -> None:
+class MissingIdentityError(Exception):
+    """Raised when Supabase mode has no usable access token at run-start
+    time (Phase 4B.4 §12 invariant #3 fail-closed check). Callers must not
+    start a background thread when this is raised."""
+
+
+def _execute_flow(run_id: str, entry: dict[str, Any], access_token: str | None) -> None:
     from src.flows.retail_flow import RetailFlow
+    from src.persistence.supabase_client import build_user_scoped_client
 
-    handler = _ListLogHandler(entry["logs"])
+    handler = _ListLogHandler(entry["logs"], redact=access_token)
     handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     root_logger = logging.getLogger()
     root_logger.addHandler(handler)
     root_logger.setLevel(logging.INFO)
 
     try:
+        if access_token:
+            try:
+                build_user_scoped_client(access_token)
+                entry["identity_preparation"] = "success"
+                entry["logs"].append(
+                    "Identity preparation: user-scoped client constructed (not yet used)."
+                )
+            except Exception as exc:  # noqa: BLE001 - any construction failure must fail safe, never raw str(exc)/token
+                entry["identity_preparation"] = "failed"
+                entry["logs"].append(
+                    f"Identity preparation FAILED ({exc.__class__.__name__}); "
+                    "continuing without persistence capability."
+                )
+        else:
+            entry["identity_preparation"] = "not_applicable"
+
         entry["logs"].append(f"Starting run {run_id}...")
         flow = RetailFlow(raw_dir=RAW_DIR, artifacts_root=ARTIFACTS_DIR, run_id=run_id)
         flow.kickoff()
@@ -138,6 +165,15 @@ def _execute_flow(run_id: str, entry: dict[str, Any]) -> None:
 
 
 def start_new_run() -> str:
+    if AUTH_MODE == "supabase":
+        access_token = st.session_state.get("access_token")
+        if not access_token:
+            raise MissingIdentityError(
+                "Supabase session has no valid access token; refusing to start a workflow run."
+            )
+    else:
+        access_token = None
+
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     entry: dict[str, Any] = {
         "logs": [],
@@ -145,10 +181,11 @@ def start_new_run() -> str:
         "running": True,
         "error": None,
         "state": None,
+        "identity_preparation": None,
         "owner_user_id": st.session_state.get("username"),
     }
     st.session_state.run_registry[run_id] = entry
-    thread = threading.Thread(target=_execute_flow, args=(run_id, entry), daemon=True)
+    thread = threading.Thread(target=_execute_flow, args=(run_id, entry, access_token), daemon=True)
     thread.start()
     st.session_state.active_run_id = run_id
     return run_id
@@ -267,8 +304,11 @@ def render_admin_page() -> None:
     with col1:
         any_running = any(e.get("running") for e in st.session_state.run_registry.values())
         if st.button("Start New Run", type="primary", disabled=any_running):
-            start_new_run()
-            st.rerun()
+            try:
+                start_new_run()
+                st.rerun()
+            except MissingIdentityError:
+                st.error("Your session is missing required identity information. Please sign in again.")
         if any_running:
             st.caption("A run is already in progress.")
 
