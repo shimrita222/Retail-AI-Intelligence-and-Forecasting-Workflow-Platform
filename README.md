@@ -160,7 +160,7 @@ print(final_state.status)          # COMPLETED or FAILED
 print(final_state.run_dir)         # artifacts/<run_id>
 ```
 
-## Supabase (Phase 4A — staging foundation validated)
+## Supabase (Phase 4A foundation; Phase 4B.1–4B.2 Auth cutover implemented)
 
 **Status: an isolated Supabase STAGING project ("Retail AI Intelligence -
 Staging") exists and has both Phase 4A migrations applied and live-verified
@@ -210,13 +210,58 @@ Legacy `config.yaml` + SHA-256 login remains the active authentication
 method until Supabase Auth passes its own acceptance gate (see the Phase 4A
 Obsidian spec) — nothing here replaces it yet.
 
+### Authentication mode (Phase 4B.1–4B.2 — implemented, not yet merged)
+
+`app.py`'s login gate now supports two modes, selected by the `AUTH_MODE`
+environment variable (see `.env.example`):
+
+- **`AUTH_MODE=supabase` (default)** — Supabase Auth is used. A missing or
+  empty `AUTH_MODE` resolves to this mode.
+- **`AUTH_MODE=legacy`** — the `config.yaml` + SHA-256 path above, selected
+  only by explicitly setting this value.
+- **Any other value fails closed** — the app refuses to render any login
+  form at all rather than guessing a mode or falling back to legacy.
+- **No automatic fallback**: a failed Supabase sign-in never triggers a
+  legacy login attempt, and vice versa — the two paths are structurally
+  independent (`src/utils/auth_session.py` never imports
+  `src/utils/auth.py`'s credential-verification functions).
+
+**Session lifecycle:** an authenticated Supabase session is validated on
+every rerun; a still-valid session makes no network call, an expired
+session is silently refreshed (re-resolving the role from `profiles`), and
+a failed refresh clears the session and returns to the login form with a
+generic expiry message. **Logout** attempts a remote Supabase sign-out
+first and always clears the local session afterward regardless of whether
+that remote call succeeds.
+
+**Workflow-run visibility:** each run started from the Admin page is
+tagged with the identity of the user who started it (`entry["owner_user_id"]`,
+set from `st.session_state.get("username")` at creation). The live-run log
+panel renders only when `entry.get("owner_user_id") == st.session_state.get("username")`
+for the session viewing the Admin page; otherwise a neutral "a run is
+currently executing" notice is shown instead, never the run ID or
+log/error content. The global "a run is already in progress" button guard
+is unaffected by this and still applies regardless of who owns the
+in-progress run.
+
+**Status:** implemented and regression-verified (444 passed, 45 skipped,
+0 failed, 0 errors, 51 warnings) on branch
+`feature/phase-4b-supabase-auth-integration` — **not yet committed or
+merged into `dev`**. Live Supabase/STAGING UI acceptance testing, real
+persistence integration (reading/writing `workflow_runs` through
+Supabase), and legacy-auth retirement all remain separate, later,
+owner-gated steps — none of them are part of this implementation.
+
 ## Testing
 
 ```bash
 pytest tests/ -v
 ```
 
-40 tests across five files:
+40 of the ML/validation tests below are the original Phase 2 baseline,
+across five files; several further phases (3, 4A, 4B.1–4B.2) have since
+added their own test files, not re-enumerated here. The full current
+suite: 444 passed, 45 skipped, 0 failed, 0 errors, 51 warnings.
 
 - `tests/test_validator.py` (13 tests) — deterministic ingestion join
   correctness, `contract_validator` PASS/FAIL behavior for missing columns,
@@ -236,6 +281,17 @@ pytest tests/ -v
   exclusion summary.
 - `tests/test_run_discovery.py` (6 tests) — real run-id recognition and
   fixture exclusion from `list_runs()`.
+- `tests/test_auth_session.py` (133 tests) — the Supabase/legacy session
+  lifecycle: `AUTH_MODE` resolution and fail-closed handling, session
+  construction/restoration/expiry/refresh, remote sign-out with
+  fail-closed cleanup on provider error, the one-shot post-logout notice,
+  and the `app.py` authentication gate itself (exercised via
+  `streamlit.testing.v1.AppTest` against the gate's real extracted
+  source, never a hand-duplicated copy).
+- `tests/test_run_ownership.py` (10 tests) — per-user workflow-run
+  visibility: ownership tagging at run creation, live-panel display
+  gating, non-exposure of another user's run ID/logs/errors, and the
+  global concurrency guard's behavior independent of ownership.
 
 Both `test_validator.py` and `test_ml_pipeline.py` run against the real CSVs
 in `data/raw/`, not synthetic mocks-only fixtures, so a passing suite
