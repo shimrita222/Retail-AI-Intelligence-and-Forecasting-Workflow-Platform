@@ -52,11 +52,50 @@ RAW_DIR = Path(CONFIG["paths"]["data_raw_dir"])
 # ---------------------------------------------------------------------------
 
 from src.utils.auth import render_login_form  # noqa: E402
+from src.utils.auth_session import (  # noqa: E402
+    AuthModeError,
+    clear_all_auth_state,
+    mark_legacy_login_if_fresh,
+    render_supabase_login_form,
+    render_supabase_logout_button,
+    resolve_auth_mode,
+    restore_session,
+    session_mode_is_consistent,
+)
 
-if not render_login_form(CONFIG):
+try:
+    AUTH_MODE = resolve_auth_mode()
+except AuthModeError:
+    st.error("Invalid AUTH_MODE configuration. Contact an administrator.")
     st.stop()
 
-render_logout_button()
+if not session_mode_is_consistent(AUTH_MODE):
+    clear_all_auth_state()
+
+if AUTH_MODE == "supabase":
+    if bool(st.session_state.get("authenticated", False)) and not restore_session("supabase", CONFIG):
+        st.warning("Your session expired. Please sign in again.")
+    if not render_supabase_login_form(CONFIG):
+        st.stop()
+    render_supabase_logout_button()
+else:  # "legacy"
+    _was_authenticated_before = bool(st.session_state.get("authenticated", False))
+    if not _was_authenticated_before:
+        # render_login_form() calls st.rerun() internally on a successful
+        # login, before control returns here -- so mark_legacy_login_if_fresh()
+        # below would never run on the success-triggering execution, and the
+        # next rerun's session_mode_is_consistent() check would then wipe the
+        # just-authenticated session for lacking auth_mode. Tag speculatively
+        # before the attempt so a successful login's internal rerun carries
+        # the tag forward; undo it immediately below if the attempt did not
+        # actually result in authentication.
+        st.session_state["auth_mode"] = "legacy"
+    if not render_login_form(CONFIG):
+        if not _was_authenticated_before:
+            st.session_state.pop("auth_mode", None)
+        st.stop()
+    mark_legacy_login_if_fresh(_was_authenticated_before)
+    render_logout_button()
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +139,14 @@ def _execute_flow(run_id: str, entry: dict[str, Any]) -> None:
 
 def start_new_run() -> str:
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
-    entry: dict[str, Any] = {"logs": [], "status": "RUNNING", "running": True, "error": None, "state": None}
+    entry: dict[str, Any] = {
+        "logs": [],
+        "status": "RUNNING",
+        "running": True,
+        "error": None,
+        "state": None,
+        "owner_user_id": st.session_state.get("username"),
+    }
     st.session_state.run_registry[run_id] = entry
     thread = threading.Thread(target=_execute_flow, args=(run_id, entry), daemon=True)
     thread.start()
@@ -228,8 +274,12 @@ def render_admin_page() -> None:
 
     active_run_id = st.session_state.active_run_id
     if active_run_id and active_run_id in st.session_state.run_registry:
-        st.subheader(f"Live run: `{active_run_id}`")
-        _render_live_log_panel(active_run_id)
+        entry = st.session_state.run_registry[active_run_id]
+        if entry.get("owner_user_id") == st.session_state.get("username"):
+            st.subheader(f"Live run: `{active_run_id}`")
+            _render_live_log_panel(active_run_id)
+        else:
+            st.info("A workflow run is currently executing.")
 
     st.divider()
     st.subheader("Run History")

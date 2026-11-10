@@ -27,6 +27,11 @@ Run:
 Current verified Phase 2 baseline on `dev`:
 40 tests passing.
 
+Current verified Phase 4B.2 baseline on branch
+`feature/phase-4b-supabase-auth-integration` (implemented, not yet
+committed/merged into `dev`):
+444 passed, 45 skipped, 0 failed, 0 errors, 51 warnings.
+
 Rules:
 - Do not weaken, skip, or delete tests merely to make a change pass.
 - When changing correctness-sensitive behavior, add or update tests that protect the behavior, not just implementation details.
@@ -138,7 +143,17 @@ Completed:
 - Phase 4A — Supabase Persistence Foundation (STAGING schema, RLS, repository layer; live-validated; not yet wired into app.py), merged into `dev` (PR #7)
 
 Future capabilities require explicit scoping before implementation, including:
-- Supabase Auth & Application Integration — Phase 4B planned and scoped; implementation not yet started
+- Supabase Auth & Application Integration — Phase 4B.1 (Supabase Auth
+  foundation) and Phase 4B.2 (Streamlit auth cutover: Supabase Auth as the
+  default `AUTH_MODE`, explicit `AUTH_MODE=legacy` as the temporary
+  migration option, fail-closed invalid-value handling, session
+  restore/refresh/logout lifecycle including remote sign-out, and
+  per-user workflow-run visibility isolation) are implemented and
+  regression-verified on branch `feature/phase-4b-supabase-auth-integration`
+  — not yet committed/merged into `dev`. Persistence
+  read/write integration, live Supabase/STAGING UI acceptance, and legacy-auth
+  retirement remain separate, later, owner-gated steps (Phase 4B.3 onward
+  per the Obsidian Phase 4B note's gated sequence; none of those are started).
 - generic external data connectors
 - expanded Analyst Crew
 - expanded Scientist Crew
@@ -153,6 +168,19 @@ Keep these visible until explicitly resolved:
 1. `compute_micro_inspection()` holiday-spike logic can fail when input contains only one `IsHoliday` category.
 2. The rendered `model_card.md` "Modeling Population" section lacks direct rendering coverage.
 3. A genuine full-dataset end-to-end ML integration run with real model training and artifact generation has not yet been completed.
+4. Phase 4B.2: no audit-trail logging exists yet for failed Supabase
+   sign-in/sign-out attempts (a deliberate scope choice during 4B.2, not a
+   defect — tracked for a possible future observability pass).
+5. Phase 4B.2: no test explicitly asserts that the Supabase logout button
+   is never rendered after a failed token refresh at the gate level
+   (currently relies on Streamlit's `st.stop()` halt-execution semantics,
+   which is structurally sound but not independently asserted).
+6. Phase 4B.2: a stray `logout_notice` session-state flag could in
+   principle persist unconsumed if `AUTH_MODE` were switched from
+   `supabase` to `legacy` mid-process after a failed remote sign-out
+   (theoretical only — `AUTH_MODE` is a deployment-time environment
+   variable, not a runtime-switchable setting in the approved
+   architecture; no sensitive data is involved).
 
 ## Mandatory Production Checkpoint
 
